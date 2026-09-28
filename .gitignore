@@ -21,5 +21,6 @@ fifth-test-ui4/
 /data-dir.txt
 /startup-error.txt
 
-# 只在本地保留的开发说明，不随源码上传
+# 只在本地保留的文档，不随源码上传
 /AGENTS.md
+/readme2.md
