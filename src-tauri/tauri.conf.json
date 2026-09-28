@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ZTDrop",
+  "version": "0.9.19",
+  "identifier": "com.ztdrop.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "ZTDrop",
+    "copyright": "Copyright (c) 2026 ZTDrop",
+    "category": "Utility",
+    "shortDescription": "ZTDrop 局域网文件传输",
+    "longDescription": "ZTDrop：纯局域网文件传输工具，四位分享码收发、设备直连聊天、浏览器单独分享；支持文件、文件夹与断点续传，不依赖公网中继。",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

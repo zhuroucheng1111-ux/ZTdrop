@@ -1,0 +1,40 @@
+{
+  "name": "ztdrop",
+  "private": true,
+  "version": "0.9.19",
+  "description": "ZTDrop：纯局域网文件传输与设备直连工具（Tauri 2 + React + Rust）",
+  "license": "MIT",
+  "author": "zhuroucheng1111-ux",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhuroucheng1111-ux/ZTdrop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zhuroucheng1111-ux/ZTdrop/issues"
+  },
+  "homepage": "https://github.com/zhuroucheng1111-ux/ZTdrop#readme",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.11",
+    "typescript": "^5.5.4",
+    "vite": "^8.3.0"
+  }
+}

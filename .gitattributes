@@ -1,0 +1,20 @@
+# 仓库内文本统一按 LF 存储，避免不同机器的 core.autocrlf 造成整文件假 diff
+* text=auto eol=lf
+
+# Windows 脚本与解决方案文件保持 CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+
+# 二进制与归档文件不做换行转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.dll binary
+*.zip binary
+*.rar binary
+*.sqlite3 binary

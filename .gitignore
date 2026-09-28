@@ -1,0 +1,22 @@
+# 依赖与构建产物
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# 本地归档与旧输出
+backup/
+fifth-test-ui4/
+/release/
+
+# 本地发布产物（作为 GitHub Release 附件，不进源码仓库）
+/ZT*.zip
+/ZT*.rar
+/ZT*.exe
+/ZT*-Win11-x64/
+
+# 运行时数据与日志
+*.log
+/data/
+/data-dir.txt
+/startup-error.txt
