@@ -44,7 +44,7 @@ const LEGACY_DOWNLOAD_DIR_KEY = "ztbeam.download-directory";
 const STOP_MODE_KEY = "ztdrop.drain-on-stop";
 const LEGACY_STOP_MODE_KEY = "ztbeam.drain-on-stop";
 /** 与 package.json / Cargo.toml / tauri.conf.json 保持一致的候选版本号。 */
-const APP_VERSION = "0.9.19";
+const APP_VERSION = "0.9.20";
 /** 项目仓库与更新页面：只在“关于”面板里交给系统浏览器打开，应用本身不访问公网。 */
 const PROJECT_REPO_URL = "https://github.com/zhuroucheng1111-ux/ZTdrop";
 const PROJECT_RELEASES_URL = `${PROJECT_REPO_URL}/releases`;

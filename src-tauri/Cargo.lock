@@ -5040,7 +5040,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "ztdrop"
-version = "0.9.19"
+version = "0.9.20"
 dependencies = [
  "anyhow",
  "hostname",

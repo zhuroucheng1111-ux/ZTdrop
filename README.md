@@ -2,7 +2,7 @@
 
 ZTDrop 是面向 Windows 的局域网分享工具。在同一个可信局域网内，可以用四位分享码传文件和文件夹、向附近设备发送消息与文件，也可以生成供手机或电脑浏览器下载的链接。文件直接在设备之间传输，不依赖账号、云盘或公网中继。
 
-**当前版本：0.9.19 预览版。** 功能需要更多的设备和多分辨率复测，因此目前不标记为 1.0 正式版。
+**当前版本：0.9.20 预览版。** 功能需要更多的设备和多分辨率复测，因此目前不标记为 1.0 正式版。
 
 ## 功能介绍
 
@@ -27,9 +27,9 @@ ZTDrop 的界面交互思路参考了 [DashBeam](https://github.com/tonyantony30
 
 ## 下载与安装
 
-- `ZTDrop_0.9.19_x64-setup.exe`：普通 NSIS 安装包，需要目标系统具备或能够安装 WebView2 Runtime。
-- `ZTDrop_0.9.19_x64-offline-setup.exe`：内置 WebView2 离线运行库，适合目标电脑无法联网安装运行库时使用。
-- `ZTDrop-V0.9.19-portable-Win11-x64.rar`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
+- `ZTDrop_0.9.20_x64-setup.exe`：普通 NSIS 安装包，需要目标系统具备或能够安装 WebView2 Runtime。
+- `ZTDrop_0.9.20_x64-offline-setup.exe`：内置 WebView2 离线运行库，适合目标电脑无法联网安装运行库时使用。
+- `ZTDrop-V0.9.20-portable-Win11-x64.rar`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
 
 安装包和程序目前未签名，Windows 可能显示“未知发布者”。两台电脑请使用**相同的版本**，并退出旧版以免端口被占用。Windows 10 尚未完成同等验收；Windows 7 不在当前支持范围内。
 
