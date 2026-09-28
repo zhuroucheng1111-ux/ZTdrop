@@ -192,6 +192,10 @@ h1 { font-size: 21px; line-height: 1.25; margin: 0; font-weight: 700; letter-spa
 .about-row strong { color: #4a5157; font-weight: 600; }
 .about-row span { color: #6f777d; text-align: right; overflow-wrap: anywhere; }
 .about-note { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eef0f2; color: #8b9297; font-size: 11px; line-height: 1.6; }
+.about-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.about-action { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 1px solid #e0e3e6; border-radius: 9px; background: #fff; color: #4a5157; font-size: 12px; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
+.about-action:hover { border-color: #c6cbd0; background: #f7f8f9; color: #272a2d; }
+.about-action-icon { width: 14px; height: 14px; fill: currentColor; }
 .drop-overlay { position: fixed; inset: 0; z-index: 20; pointer-events: none; display: grid; place-items: center; background: #eaf3f9ad; color: #233b51; font-size: 25px; font-weight: 700; border: 6px solid #80a7c7; }
 .messenger-card { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .direct-toolbar { flex: none; min-height: 32px; display: flex; align-items: center; justify-content: flex-end; padding: 0 16px; border-bottom: 1px solid #e9ebed; }

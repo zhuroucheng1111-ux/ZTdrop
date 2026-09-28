@@ -20,3 +20,6 @@ fifth-test-ui4/
 /data/
 /data-dir.txt
 /startup-error.txt
+
+# 只在本地保留的开发说明，不随源码上传
+/AGENTS.md

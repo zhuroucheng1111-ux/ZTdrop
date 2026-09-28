@@ -45,6 +45,9 @@ const STOP_MODE_KEY = "ztdrop.drain-on-stop";
 const LEGACY_STOP_MODE_KEY = "ztbeam.drain-on-stop";
 /** 与 package.json / Cargo.toml / tauri.conf.json 保持一致的候选版本号。 */
 const APP_VERSION = "0.9.19";
+/** 项目仓库与更新页面：只在“关于”面板里交给系统浏览器打开，应用本身不访问公网。 */
+const PROJECT_REPO_URL = "https://github.com/zhuroucheng1111-ux/ZTdrop";
+const PROJECT_RELEASES_URL = `${PROJECT_REPO_URL}/releases`;
 const SESSION_STATE_LABEL: Record<SessionView["state"], string> = {
   active: "等待连接",
   transferring: "传输中",
@@ -116,6 +119,14 @@ export default function App() {
     setToastMessage(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMessage(""), 4000);
+  }
+
+  async function openProjectPage(url: string) {
+    try {
+      await invoke("open_external_url", { url });
+    } catch {
+      showToast("无法打开系统浏览器，请手动访问项目页面");
+    }
   }
 
   async function useSource(paths: string[], tab: MainTab) {
@@ -751,6 +762,15 @@ export default function App() {
               <div className="about-row"><strong>作者</strong><span>zhuroucheng</span></div>
               <div className="about-row"><strong>协议版本</strong><span>v{networkSnapshot?.protocol_version ?? 2}</span></div>
               <div className="about-row"><strong>数据目录</strong><span title={networkSnapshot?.data_dir}>{networkSnapshot?.data_dir ?? "读取中…"}</span></div>
+            </div>
+            <div className="about-actions">
+              <button type="button" className="about-action" title="在系统浏览器中打开 GitHub 仓库" onClick={() => void openProjectPage(PROJECT_REPO_URL)}>
+                <svg className="about-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" /></svg>
+                <span>GitHub 仓库</span>
+              </button>
+              <button type="button" className="about-action" title="在系统浏览器中打开更新与下载页面" onClick={() => void openProjectPage(PROJECT_RELEASES_URL)}>
+                <span>更新与下载</span>
+              </button>
             </div>
             <div className="about-note">纯局域网直连，不经过公网中继、不做端口映射；四位分享码、设备直连聊天与浏览器分享共用同一套分享生命周期。</div>
           </>}

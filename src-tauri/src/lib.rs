@@ -370,6 +370,7 @@ pub fn run() {
             clear_conversation,
             hide_to_tray,
             quit_app,
+            open_external_url,
             get_network_preference,
             set_network_preference,
             offer_to_device,

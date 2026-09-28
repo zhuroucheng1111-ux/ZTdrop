@@ -457,6 +457,49 @@ pub fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// “关于”面板只允许在系统浏览器中打开这两个项目页面。
+///
+/// 应用本身不访问公网，写成白名单精确匹配而不是前缀匹配，前端即使被注入也没法借这个命令
+/// 启动任意 URL 或向 `cmd` 传入额外参数。
+const ALLOWED_EXTERNAL_URLS: [&str; 2] = [
+    "https://github.com/zhuroucheng1111-ux/ZTdrop",
+    "https://github.com/zhuroucheng1111-ux/ZTdrop/releases",
+];
+
+fn is_allowed_external_url(url: &str) -> bool {
+    ALLOWED_EXTERNAL_URLS.contains(&url)
+}
+
+/// 用系统默认浏览器打开项目仓库或更新页面。
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    if !is_allowed_external_url(&url) {
+        return Err("只允许打开 ZTDrop 项目自身的页面".into());
+    }
+    open_in_system_browser(&url).map_err(|error| format!("调用系统浏览器失败：{error}"))
+}
+
+#[cfg(windows)]
+fn open_in_system_browser(url: &str) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    /// 转交 `start` 时不要弹出控制台窗口。
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // 第一个空参数是 `start` 的窗口标题，避免 URL 被当成标题解析。
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(not(windows))]
+fn open_in_system_browser(_url: &str) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "ZTDrop 目前只支持 Windows",
+    ))
+}
+
 /// 删除单条本机聊天记录（规划 §34：第一阶段只删除本机记录，不做跨设备撤回）。
 #[tauri::command]
 pub async fn delete_message(message_id: String, state: State<'_, AppState>) -> Result<(), String> {
@@ -944,4 +987,30 @@ pub async fn start_download(
         .await;
     });
     Ok(task_id)
+}
+
+#[cfg(test)]
+mod external_url_tests {
+    use super::*;
+
+    #[test]
+    fn only_project_pages_can_be_opened() {
+        assert!(is_allowed_external_url(
+            "https://github.com/zhuroucheng1111-ux/ZTdrop"
+        ));
+        assert!(is_allowed_external_url(
+            "https://github.com/zhuroucheng1111-ux/ZTdrop/releases"
+        ));
+        assert!(!is_allowed_external_url(
+            "https://github.com/zhuroucheng1111-ux/ZTdrop/issues"
+        ));
+        assert!(!is_allowed_external_url("https://github.com/other/repo"));
+        assert!(!is_allowed_external_url("https://example.com/"));
+        assert!(!is_allowed_external_url(
+            "file:///C:/Windows/System32/calc.exe"
+        ));
+        assert!(!is_allowed_external_url(
+            "https://github.com/zhuroucheng1111-ux/ZTdrop&calc"
+        ));
+    }
 }
