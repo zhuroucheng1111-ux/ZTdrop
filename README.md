@@ -77,4 +77,4 @@ cargo test --lib --manifest-path src-tauri/Cargo.toml
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
 
-维护者的架构、协议约束、打包命令和待验收项目统一记录在 [AGENTS.md](AGENTS.md)。本仓库目前没有 `LICENSE` 文件；公开发布时请先确定授权条款。
+公开发布时请先确定授权条款。
