@@ -34,6 +34,12 @@ Android 为独立 Kotlin 原生工程，当前仅保留最新版源码（build33
 
 ![直链：浏览器下载与二维码](docs/screenshots/03-web-share.png)
 
+### Android · 界面总览
+
+从左到右依次为传输、消息、设备、我的。
+
+![Android 1.0.0：传输、消息、设备、我的四页横排截图](docs/screenshots/04-android-overview.png)
+
 ## 功能介绍
 
 | 功能 | 使用方式 | 通信协议 |
