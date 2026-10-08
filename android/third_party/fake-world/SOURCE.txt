@@ -1,0 +1,7 @@
+Source: https://github.com/LiangNiang/fake-world
+License: GPL-3.0 (see LICENSE)
+Copied and converted SVG paths:
+- packages/web/src/assets/sticker-outlined.svg -> app/src/main/res/drawable/ic_emoji.xml
+- packages/web/src/assets/add2-outlined.svg -> app/src/main/res/drawable/ic_chat_plus.xml
+- packages/web/src/assets/keyboard-outlined.svg -> app/src/main/res/drawable/ic_chat_keyboard.xml
+Changes: SVG pathData converted to Android VectorDrawable XML; geometry unchanged.

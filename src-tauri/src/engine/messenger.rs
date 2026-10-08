@@ -5,7 +5,7 @@ use crate::engine::discovery::{PeerRegistry, DISCOVERY_PORT};
 use crate::engine::network::NetworkPolicy;
 use crate::engine::protocol;
 use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
@@ -115,6 +115,14 @@ fn safe_name(name: &str) -> bool {
         })
 }
 
+fn message_image_path(
+    db: &Connection,
+    message_id: &str,
+    device_id: &str,
+) -> Result<Option<String>> {
+    Ok(db.query_row("SELECT COALESCE(mm.local_path,r.file_path) FROM messages m LEFT JOIN message_media mm ON mm.message_id=m.message_id LEFT JOIN resources r ON r.token=m.token AND m.sender_id=?2 WHERE m.message_id=?1 AND m.is_folder=0 AND m.kind='file'", params![message_id, device_id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten())
+}
+
 impl Messenger {
     pub fn new(
         directory: &Path,
@@ -157,6 +165,7 @@ impl Messenger {
                 kind TEXT NOT NULL, content TEXT NOT NULL, file_name TEXT, file_size INTEGER, is_folder INTEGER NOT NULL DEFAULT 0,
                 token TEXT, created_at INTEGER NOT NULL, download_status TEXT NOT NULL DEFAULT 'pending',
                 delivery_status TEXT NOT NULL DEFAULT 'pending');
+            CREATE TABLE IF NOT EXISTS message_media(message_id TEXT PRIMARY KEY, local_path TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS messages_peer_time ON messages(peer_id, created_at);
             CREATE TABLE IF NOT EXISTS resources(share_id TEXT PRIMARY KEY, token TEXT NOT NULL, file_path TEXT NOT NULL,
                 file_name TEXT NOT NULL, file_size INTEGER NOT NULL, is_folder INTEGER NOT NULL);")?;
@@ -453,8 +462,38 @@ impl Messenger {
             ],
         )?;
         self.store_message(&message)?;
+        if !folder && paths.len() == 1 {
+            self.set_local_media(&message.message_id, &paths[0])?;
+        }
         let _ = self.deliver(&message).await;
         Ok(message)
+    }
+
+    pub fn validate_media_download(&self, message_id: &str, token: &str) -> Result<()> {
+        let found: bool = self.db()?.query_row("SELECT EXISTS(SELECT 1 FROM messages WHERE message_id=?1 AND token=?2 AND sender_id!=?3)", params![message_id, token, self.device_id], |r| r.get(0))?;
+        if !found {
+            bail!("文件与聊天消息不匹配");
+        }
+        Ok(())
+    }
+
+    pub fn set_local_media(&self, message_id: &str, path: &Path) -> Result<()> {
+        self.db()?.execute("INSERT OR REPLACE INTO message_media(message_id,local_path) SELECT message_id,?2 FROM messages WHERE message_id=?1 AND is_folder=0", params![message_id, path.to_string_lossy()])?;
+        let _ = self.app.emit("messenger-changed", ());
+        Ok(())
+    }
+
+    pub fn image_preview(&self, message_id: &str) -> Result<Option<String>> {
+        if !valid_id(message_id) {
+            bail!("消息 ID 无效");
+        }
+        let path = message_image_path(&self.db()?, message_id, &self.device_id)?;
+        match path {
+            Some(path) if !path.contains('|') => {
+                crate::engine::chat_media::read_image(Path::new(&path))
+            }
+            _ => Ok(None),
+        }
     }
 
     fn store_message(&self, message: &ChatMessage) -> Result<()> {
@@ -708,8 +747,6 @@ impl Messenger {
     }
 }
 
-use rusqlite::OptionalExtension;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -753,6 +790,32 @@ mod tests {
         let older = messages_page(&db, &peer_id, Some(&recent[0].message_id))?;
         assert_eq!(older.len(), 1);
         assert_eq!(older[0].message_id, format!("{:032x}", 1));
+        Ok(())
+    }
+    #[test]
+    fn media_paths_are_local_and_preserve_legacy_sent_images() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("CREATE TABLE messages(message_id TEXT,sender_id TEXT,kind TEXT,is_folder INTEGER,token TEXT);
+          CREATE TABLE message_media(message_id TEXT PRIMARY KEY,local_path TEXT);
+          CREATE TABLE resources(token TEXT,file_path TEXT);
+          INSERT INTO messages VALUES('sent','me','file',0,'token'),('received','peer','file',0,'token'),('folder','me','folder',1,'token');
+          INSERT INTO resources VALUES('token','sent.png');")?;
+        assert_eq!(
+            message_image_path(&db, "sent", "me")?,
+            Some("sent.png".into())
+        );
+        assert_eq!(message_image_path(&db, "received", "me")?, None);
+        db.execute(
+            "INSERT INTO message_media VALUES('received','saved.png')",
+            [],
+        )?;
+        assert_eq!(
+            message_image_path(&db, "received", "me")?,
+            Some("saved.png".into())
+        );
+        assert_eq!(message_image_path(&db, "folder", "me")?, None);
+        db.execute("DELETE FROM messages WHERE message_id='received'", [])?;
+        assert_eq!(message_image_path(&db, "received", "me")?, None);
         Ok(())
     }
 }

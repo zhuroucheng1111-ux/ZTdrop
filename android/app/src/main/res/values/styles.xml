@@ -1,0 +1,17 @@
+<resources>
+<style name="BottomSheetAnimation">
+<item name="android:windowEnterAnimation">@anim/bottom_sheet_enter</item>
+<item name="android:windowExitAnimation">@anim/bottom_sheet_exit</item>
+</style>
+<style name="ProgressiveWindowAnimation">
+<item name="android:windowEnterAnimation">@anim/progressive_enter</item>
+<item name="android:windowExitAnimation">@anim/progressive_exit</item>
+</style>
+<style name="AnimatedAlert" parent="android:style/Theme.Material.Light.Dialog.Alert">
+<item name="android:windowAnimationStyle">@style/ProgressiveWindowAnimation</item>
+</style>
+<style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+<item name="android:alertDialogTheme">@style/AnimatedAlert</item>
+<item name="android:colorAccent">#007AFF</item>
+</style>
+</resources>

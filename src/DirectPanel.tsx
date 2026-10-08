@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type KeyboardEvent } from "react";
+import ChatImage, { isChatImage } from "./ChatImage";
+import DeviceContextMenu from "./DeviceContextMenu";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -18,17 +20,17 @@ interface Props {
   isDragging: boolean;
   incomingOffer: IncomingOffer | null;
   /// `files` = 多选文件，`folder` = 选择单个文件夹（原生对话框无法二合一）。
-  onPick: (mode: "files" | "folder") => void;
+  onPick: (mode: "files" | "folder" | "images") => void;
   onAcceptOffer: () => void;
   onRejectOffer: () => void;
   onDownload: (message: ChatMessage, peer: FriendDevice) => Promise<void>;
-  showToast: (message: string) => void;
+  reportStatus: (message: string) => void;
 }
 
 function sizeText(size: number) { return size < 1024 ? `${size} B` : size < 1048576 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1048576).toFixed(1)} MB`; }
 
 export default function DirectPanel({ localInfo, peers, messageProgress, senderProgress, standaloneTransfer, onClearTransfer,
-  attachment, onClearAttachment, isDragging, incomingOffer, onPick, onAcceptOffer, onRejectOffer, onDownload, showToast }: Props) {
+  attachment, onClearAttachment, isDragging, incomingOffer, onPick, onAcceptOffer, onRejectOffer, onDownload, reportStatus }: Props) {
   const [friends, setFriends] = useState<FriendDevice[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -36,12 +38,39 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [emojiMenuOpen, setEmojiMenuOpen] = useState(false);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [deviceMenu, setDeviceMenu] = useState<{ friend: FriendDevice; x: number; y: number; anchor: HTMLElement } | null>(null);
+  const [messageMenu, setMessageMenu] = useState<{ message: ChatMessage; x: number; y: number; anchor: HTMLElement } | null>(null);
   const sentAttachmentId = useRef(0);
   const loadedOlderMessages = useRef(false);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
   const selected = friends.find((friend) => friend.device_id === selectedId);
+
+  function openDeviceMenu(event: MouseEvent<HTMLButtonElement> | KeyboardEvent<HTMLButtonElement>, friend: FriendDevice) {
+    event.preventDefault();
+    const anchor = event.currentTarget;
+    const bounds = anchor.getBoundingClientRect();
+    setMessageMenu(null);
+    setDeviceMenu({ friend, anchor, x: "clientX" in event ? event.clientX : bounds.left + 24,
+      y: "clientY" in event ? event.clientY : bounds.bottom });
+  }
+
+  function openMessageMenu(event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>, message: ChatMessage) {
+    event.preventDefault();
+    event.stopPropagation();
+    const anchor = event.currentTarget;
+    const bounds = anchor.getBoundingClientRect();
+    setDeviceMenu(null);
+    setMessageMenu({ message, anchor, x: "clientX" in event ? event.clientX : bounds.left + 24,
+      y: "clientY" in event ? event.clientY : bounds.bottom });
+  }
+
+  useEffect(() => { setMessageMenu(null); setDeviceMenu(null); }, [selectedId]);
+  useEffect(() => {
+    if (messageMenu && !messages.some(message => message.message_id === messageMenu.message.message_id)) setMessageMenu(null);
+  }, [messages, messageMenu]);
 
   function replaceMessages(list: ChatMessage[]) {
     loadedOlderMessages.current = false;
@@ -55,7 +84,7 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
       try {
         const list = await invoke<FriendDevice[]>("get_friends");
         if (active) setFriends(list);
-      } catch (error) { if (active) showToast("读取好友失败：" + String(error)); }
+      } catch (error) { if (active) reportStatus("读取好友失败：" + String(error)); }
     };
     void refresh();
     const timer = setInterval(refresh, 5000);
@@ -80,7 +109,7 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
           });
           setHasOlderMessages((current) => loadedOlderMessages.current ? current : list.length === 500);
         }
-      } catch (error) { if (active) showToast("读取消息失败：" + String(error)); }
+      } catch (error) { if (active) reportStatus("读取消息失败：" + String(error)); }
     };
     void refresh();
     const listener = listen("messenger-changed", refresh);
@@ -101,7 +130,7 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
         return [...older.filter((message) => !known.has(message.message_id)), ...current];
       });
       setHasOlderMessages(older.length === 500);
-    } catch (error) { showToast("读取更早消息失败：" + String(error)); }
+    } catch (error) { reportStatus("读取更早消息失败：" + String(error)); }
     finally { setLoadingOlderMessages(false); }
   }
 
@@ -109,9 +138,9 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
     setBusy(true);
     try {
       await invoke("request_friend", { peerId: peer.node_id });
-      showToast("已向 " + peer.device_name + " 发送好友请求");
+      reportStatus("已向 " + peer.device_name + " 发送好友请求");
       setFriends(await invoke("get_friends"));
-    } catch (error) { showToast("好友请求失败：" + String(error)); }
+    } catch (error) { reportStatus("好友请求失败：" + String(error)); }
     finally { setBusy(false); }
   }
 
@@ -121,7 +150,7 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
       await invoke("answer_friend", { peerId, accept });
       setFriends(await invoke("get_friends"));
       if (accept) setSelectedId(peerId);
-    } catch (error) { showToast("处理好友请求失败：" + String(error)); }
+    } catch (error) { reportStatus("处理好友请求失败：" + String(error)); }
     finally { setBusy(false); }
   }
 
@@ -134,10 +163,10 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
     setBusy(true);
     try {
       await invoke("remove_friend", { peerId: friend.device_id });
-      setSelectedId("");
+      if (selectedIdRef.current === friend.device_id) setSelectedId("");
       setFriends(await invoke("get_friends"));
-      showToast("已删除好友");
-    } catch (error) { showToast("删除好友失败：" + String(error)); }
+      reportStatus("已删除好友");
+    } catch (error) { reportStatus("删除好友失败：" + String(error)); }
     finally { setBusy(false); }
   }
 
@@ -147,20 +176,23 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
       await invoke("delete_message", { messageId: message.message_id });
       const list = await invoke<ChatMessage[]>("get_messages", { peerId: message.peer_id });
       if (selectedIdRef.current === message.peer_id) replaceMessages(list);
-    } catch (error) { showToast("删除记录失败：" + String(error)); }
+    } catch (error) { reportStatus("删除记录失败：" + String(error)); }
   }
 
   async function clearConversation(friend: FriendDevice) {
+    if (busy) return;
     const confirmed = await ask(`清空与“${friend.device_name}”的本机聊天记录？对方设备上的记录不受影响。`, {
       title: "清空聊天记录", kind: "warning", okLabel: "清空", cancelLabel: "取消",
     });
     if (!confirmed) return;
+    setBusy(true);
     try {
       await invoke<number>("clear_conversation", { peerId: friend.device_id });
       const list = await invoke<ChatMessage[]>("get_messages", { peerId: friend.device_id });
       if (selectedIdRef.current === friend.device_id) replaceMessages(list);
-      showToast("已清空本机聊天记录");
-    } catch (error) { showToast("清空聊天记录失败：" + String(error)); }
+      reportStatus("已清空本机聊天记录");
+    } catch (error) { reportStatus("清空聊天记录失败：" + String(error)); }
+    finally { setBusy(false); }
   }
 
   async function sendText() {
@@ -171,7 +203,7 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
       setDraft("");
       const list = await invoke<ChatMessage[]>("get_messages", { peerId: selected.device_id });
       if (selectedIdRef.current === selected.device_id) replaceMessages(list);
-    } catch (error) { showToast("发送消息失败：" + String(error)); }
+    } catch (error) { reportStatus("发送消息失败：" + String(error)); }
     finally { setBusy(false); }
   }
 
@@ -179,11 +211,12 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
     if (!selected || paths.length === 0 || busy) return;
     setBusy(true);
     try {
-      await invoke("send_file_message", { peerId: selected.device_id, filePaths: paths });
+      const groups = paths.length > 1 && paths.every(isChatImage) ? paths.map(path => [path]) : [paths];
+      for (const filePaths of groups) await invoke("send_file_message", { peerId: selected.device_id, filePaths });
       const list = await invoke<ChatMessage[]>("get_messages", { peerId: selected.device_id });
       if (selectedIdRef.current === selected.device_id) replaceMessages(list);
       onClearAttachment();
-    } catch (error) { showToast("发送文件消息失败：" + String(error)); }
+    } catch (error) { reportStatus("发送文件消息失败：" + String(error)); }
     finally { setBusy(false); }
   }
 
@@ -191,8 +224,8 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
   // 发送结果只看聊天记录里的文件气泡。
   useEffect(() => {
     if (!attachment || attachment.id === sentAttachmentId.current) return;
-    if (!selected) { sentAttachmentId.current = attachment.id; onClearAttachment(); showToast("请先选择一台好友设备"); return; }
-    if (!selected.online) { sentAttachmentId.current = attachment.id; onClearAttachment(); showToast("设备已离线，无法发送文件"); return; }
+    if (!selected) { sentAttachmentId.current = attachment.id; onClearAttachment(); reportStatus("请先选择一台好友设备"); return; }
+    if (!selected.online) { sentAttachmentId.current = attachment.id; onClearAttachment(); reportStatus("设备已离线，无法发送文件"); return; }
     if (busy) return;
     sentAttachmentId.current = attachment.id;
     void sendFile(attachment.paths);
@@ -216,20 +249,20 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
       {["completed", "error"].includes(standaloneTransfer.status) && <button onClick={onClearTransfer} aria-label="关闭接收状态">×</button>}
     </div>}
     {incomingOffer && <div className="incoming-card"><div className="incoming-copy"><strong>{incomingOffer.from_device_name} 发来文件</strong><span>{incomingOffer.file_name}</span></div><div className="incoming-actions"><button className="small-button dark" onClick={onAcceptOffer}>接收</button><button className="small-button light" onClick={onRejectOffer}>拒绝</button></div></div>}
-    <div className="messenger-layout">
-      <aside className="friend-sidebar">
-        <strong className="sidebar-title">我的设备</strong>
-        {friends.filter((friend) => friend.status === "accepted").map((friend) => <button key={friend.device_id} className={selectedId === friend.device_id ? "friend-item active" : "friend-item"} onClick={() => { setSelectedId(friend.device_id); onClearAttachment(); }}><span className={friend.online ? "online-dot" : "offline-dot"}/><span>{friend.device_name}</span></button>)}
+    <div className="messenger-layout chat-layout">
+      <aside className="friend-sidebar chat-sidebar">
+        <strong className="sidebar-title chat-sidebar-title">我的设备</strong>
+        {friends.filter((friend) => friend.status === "accepted").map((friend) => <button key={friend.device_id} aria-haspopup="menu" aria-expanded={deviceMenu?.friend.device_id === friend.device_id} onContextMenu={(event) => openDeviceMenu(event, friend)} onKeyDown={(event) => { if ((event.shiftKey && event.key === "F10") || event.key === "ContextMenu") openDeviceMenu(event, friend); }} className={selectedId === friend.device_id ? "friend-item chat-sidebar-item active" : "friend-item chat-sidebar-item"} onClick={() => { setSelectedId(friend.device_id); onClearAttachment(); }}><span className={friend.online ? "online-dot" : "offline-dot"}/><span className="chat-sb-copy"><span className="chat-sb-name">{friend.device_name}</span><span className="chat-sb-sub">{peers.find((peer) => peer.node_id === friend.device_id)?.ip || (friend.online ? "在线" : "离线")}</span></span></button>)}
         {friends.filter((friend) => friend.status === "pending_in").map((friend) => <div className="friend-request" key={friend.device_id}><strong>{friend.device_name} 请求添加</strong><div><button disabled={busy} onClick={() => answer(friend.device_id, true)}>接受</button><button disabled={busy} onClick={() => answer(friend.device_id, false)}>拒绝</button></div></div>)}
         {friends.filter((friend) => friend.status === "pending_out").map((friend) => <div className="friend-request" key={friend.device_id}>{friend.device_name} · 等待接受</div>)}
-        <strong className="sidebar-title nearby-title">添加附近设备</strong>
-        {nearby.map((peer) => <div className="nearby-item" key={peer.node_id}><span>{peer.device_name}</span><button disabled={busy} onClick={() => add(peer)}>添加</button></div>)}
+        <div className="chat-sidebar-divider" /><strong className="sidebar-title nearby-title chat-sidebar-title">添加附近设备</strong>
+        {nearby.map((peer) => <div className="nearby-item chat-sidebar-item" key={peer.node_id}><span className="online-dot" /><span className="chat-sb-copy"><span className="chat-sb-name">{peer.device_name}</span><span className="chat-sb-sub">{peer.ip}</span></span><button disabled={busy} onClick={() => add(peer)}>添加</button></div>)}
         {!friends.length && !nearby.length && <p className="subtext">暂无设备</p>}
       </aside>
-      <div className="conversation">
+      <div className="conversation chat-main">
         {selected && selected.status === "accepted" ? <>
-          <div className="conversation-heading"><strong>{selected.device_name}</strong><div className="conversation-actions"><span>{selected.online ? "● 在线" : "○ 离线"}</span><button disabled={busy || !messages.length} onClick={() => void clearConversation(selected)}>清空记录</button><button disabled={busy} onClick={() => void removeFriend(selected)}>删除好友</button></div></div>
-          <div className="message-list">
+          <div className="conversation-heading chat-main-hdr"><strong className="chat-main-title">{selected.device_name}</strong><div className="conversation-actions"><span>{selected.online ? "● 在线" : "○ 离线"}</span></div></div>
+          <div className="message-list chat-main-body">
             {hasOlderMessages && <button className="older-messages" disabled={loadingOlderMessages} onClick={() => void loadOlderMessages()}>{loadingOlderMessages ? "正在加载…" : "加载更早消息"}</button>}
             {messages.map((message) => {
               const mine = message.sender_id === localInfo?.node_id;
@@ -238,16 +271,23 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
               const transfer = sent || received;
               const ratio = transfer?.total ? Math.min(100, Math.round(transfer.transferred / transfer.total * 100)) : transfer?.status === "completed" ? 100 : 0;
               const speed = transfer?.speed_mb ?? 0;
+              const imageMessage = message.kind !== "text" && !message.is_folder && isChatImage(message.file_name || "");
               const transferLabel = sent
                 ? sent.status === "sending" ? "正在发送" : sent.status === "completed" ? "发送完成" : sent.status === "stopped" ? "发送已停止" : "发送失败"
                 : received ? received.status === "completed" ? "接收完成" : received.status === "error" ? "接收失败" : received.status === "saving" ? "正在保存" : received.status === "connecting" ? "正在连接" : "正在接收" : "";
               const active = !!transfer && !["completed", "error", "stopped"].includes(transfer.status);
               const finished = transfer?.status === "completed" || (!mine && message.download_status === "completed");
-              return <div key={message.message_id} className={`message-row ${mine ? "mine" : "theirs"} ${message.kind !== "text" ? "file-row" : ""} ${active ? "morph-active" : ""} ${finished ? "morph-finished" : ""}`}>
-                <div className="message-bubble" title={transfer?.error_msg || undefined}>
-                  {message.kind === "text" ? <span>{message.content}</span> : <>
+              return <div key={message.message_id} className={`message-row chat-msg-row ${mine ? "mine sent" : "theirs"} ${message.kind !== "text" ? "file-row" : ""} ${imageMessage ? "image-row" : ""} ${active ? "morph-active" : ""} ${finished ? "morph-finished" : ""}`}>
+                <div className={`chat-msg-av ${mine ? "mine-avatar" : "peer-avatar"}`} aria-hidden="true">{mine ? "我" : selected.device_name.slice(0, 1).toUpperCase()}</div>
+                <div className="chat-message-content">
+                <div className={`message-bubble chat-msg-bubble ${mine ? "sb" : "rb"}`} title={transfer?.error_msg || undefined} tabIndex={0} aria-haspopup="menu"
+                  aria-expanded={messageMenu?.message.message_id === message.message_id}
+                  onContextMenu={(event) => openMessageMenu(event, message)}
+                  onKeyDown={(event) => { if ((event.shiftKey && event.key === "F10") || event.key === "ContextMenu") openMessageMenu(event, message); }}>
+                  {message.kind === "text" ? <span className="message-text">{message.content}</span> : <>
+                    {imageMessage && <ChatImage id={message.message_id} name={message.file_name || "图片"} ready={mine || finished} />}
                     <div className="file-bubble-heading"><span className="file-bubble-icon" aria-hidden="true">{message.is_folder ? "▣" : "▤"}</span><strong>{message.file_name}</strong></div>
-                    <div className="file-bubble-main"><strong>{active ? `${ratio}%` : finished ? "100%" : message.is_folder ? "文件夹" : sizeText(message.file_size || 0)}</strong><span>{active ? transferLabel : finished ? mine ? "发送完成" : "已下载" : message.is_folder ? "文件夹" : "文件"}</span>{finished && !active && <span className="file-bubble-check" aria-hidden="true">✓</span>}</div>
+                    <div className="file-bubble-main"><strong>{active ? `${ratio}%` : finished ? "100%" : message.is_folder ? "文件夹" : sizeText(message.file_size || 0)}</strong><span>{active ? transferLabel : finished ? mine ? "发送完成" : "已下载" : message.is_folder ? "文件夹" : imageMessage ? "图片" : "文件"}</span>{finished && !active && <span className="file-bubble-check" aria-hidden="true">✓</span>}</div>
                     <div className="file-bubble-extra" aria-hidden={!active}>
                       <div className="file-bubble-extra-inner">
                         <span>{sizeText(transfer?.transferred || 0)} / {sizeText(transfer?.total || 0)}{active && ` · ${speed.toFixed(1)} MB/s`}</span>
@@ -257,17 +297,40 @@ export default function DirectPanel({ localInfo, peers, messageProgress, senderP
                     {!active && transfer && !finished && <span className="file-bubble-error">{transferLabel}</span>}
                     {!mine && !active && !finished && <div className="file-message-action"><button disabled={!selected.online || busy} onClick={() => void onDownload(message, selected)}>{selected.online ? "下载" : "发送设备当前离线"}</button></div>}
                   </>}
-                  <time>{new Date(message.created_at * 1000).toLocaleString()}{mine && ` · ${message.delivery_status === "delivered" ? "已送达" : message.delivery_status === "cancelled" ? "已取消" : "待送达"}`}</time>
-                  <button className="message-delete" aria-label="删除这条本机记录" title="删除这条本机记录" onClick={() => void deleteMessage(message)}>×</button>
+                </div>
+                <time className="chat-msg-status">{new Date(message.created_at * 1000).toLocaleString()}{mine && ` · ${message.delivery_status === "delivered" ? "已送达" : message.delivery_status === "cancelled" ? "已取消" : "待送达"}`}</time>
                 </div>
               </div>;
             })}
             {!messages.length && <p className="empty-conversation">还没有消息</p>}
           </div>
-          <div className="composer"><div className="attachment-picker"><button className="attachment-plus" aria-label="添加附件" title={selected.online ? "发送文件或文件夹" : "设备离线"} aria-expanded={attachmentMenuOpen} disabled={!selected.online} onClick={() => setAttachmentMenuOpen((open) => !open)}><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" /></svg></button>{attachmentMenuOpen && <div className="attachment-menu"><button onClick={() => { setAttachmentMenuOpen(false); onPick("files"); }}>选择文件（可多选）</button><button onClick={() => { setAttachmentMenuOpen(false); onPick("folder"); }}>选择文件夹</button></div>}</div><input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void sendText(); if (event.key === "Escape") setAttachmentMenuOpen(false); }} placeholder={selected.online ? "输入消息…" : "设备离线"} disabled={!selected.online}/><button disabled={!selected.online || !draft.trim() || busy} onClick={sendText}>发送</button></div>
+          <div className="composer chat-input-row">
+            <div className="emoji-picker"><button type="button" className="chat-emoji-btn" aria-label="选择表情" aria-expanded={emojiMenuOpen} disabled={!selected.online} onClick={() => { setEmojiMenuOpen(!emojiMenuOpen); setAttachmentMenuOpen(false); }}>☺</button>
+              {emojiMenuOpen && <div className="emoji-menu">{["😀", "😊", "👍", "🎉", "❤️", "🙏", "✅", "👋"].map((emoji) => <button key={emoji} type="button" aria-label={`插入 ${emoji}`} onClick={() => { setDraft(draft + emoji); setEmojiMenuOpen(false); }}>{emoji}</button>)}</div>}
+            </div>
+            <input className="chat-input" value={draft} onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) void sendText(); if (event.key === "Escape") { setAttachmentMenuOpen(false); setEmojiMenuOpen(false); } }} placeholder={selected.online ? "输入消息…" : "设备离线"} disabled={!selected.online} />
+            <div className="attachment-picker"><button className="attachment-plus chat-emoji-btn" aria-label="添加附件" title={selected.online ? "发送文件或文件夹" : "设备离线"} aria-expanded={attachmentMenuOpen} disabled={!selected.online} onClick={() => { setAttachmentMenuOpen(!attachmentMenuOpen); setEmojiMenuOpen(false); }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+            </button>{attachmentMenuOpen && <div className="attachment-menu"><button onClick={() => { setAttachmentMenuOpen(false); onPick("images"); }}>选择图片（可多选）</button><button onClick={() => { setAttachmentMenuOpen(false); onPick("files"); }}>选择文件（可多选）</button><button onClick={() => { setAttachmentMenuOpen(false); onPick("folder"); }}>选择文件夹</button></div>}</div>
+            <button className="chat-send-btn" aria-label="发送消息" disabled={!selected.online || !draft.trim() || busy} onClick={sendText}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg></button>
+          </div>
         </> : <div className="conversation-empty"><strong>选择一台好友设备</strong><span>添加附近设备后即可聊天并发送文件消息</span></div>}
       </div>
     </div>
+    {messageMenu && <DeviceContextMenu x={messageMenu.x} y={messageMenu.y} name="消息" disabled={false}
+      onClose={() => setMessageMenu(null)} onReturnFocus={() => messageMenu.anchor.focus()}
+      onCopy={messageMenu.message.kind === "text" ? () => {
+        const message = messageMenu.message;
+        void navigator.clipboard.writeText(message.content).then(() => {
+          setMessageMenu(current => current?.message.message_id === message.message_id ? null : current);
+        }).catch(error => reportStatus("复制失败：" + String(error)));
+      } : undefined}
+      onDelete={() => { const message = messageMenu.message; setMessageMenu(null); void deleteMessage(message); }} />}
+    {deviceMenu && <DeviceContextMenu x={deviceMenu.x} y={deviceMenu.y} name={deviceMenu.friend.device_name} disabled={busy}
+      onClose={() => setDeviceMenu(null)} onReturnFocus={() => deviceMenu.anchor.focus()}
+      onClear={() => { const friend = deviceMenu.friend; setDeviceMenu(null); void clearConversation(friend); }}
+      onRemove={() => { const friend = deviceMenu.friend; setDeviceMenu(null); void removeFriend(friend); }} />}
     {isDragging && <div className="drop-hint">松开后直接发送给对方</div>}
   </section>;
 }

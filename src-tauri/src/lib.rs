@@ -386,6 +386,7 @@ pub fn run() {
             send_text_message,
             send_file_message,
             set_message_download_status,
+            get_message_image,
             create_web_share,
             get_web_share,
             stop_web_share

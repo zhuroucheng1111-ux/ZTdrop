@@ -432,6 +432,21 @@ pub async fn send_file_message(
 }
 
 #[tauri::command]
+pub async fn get_message_image(
+    message_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let messenger = state.messenger.clone();
+    tokio::task::spawn_blocking(move || {
+        messenger
+            .image_preview(&message_id)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn set_message_download_status(
     message_id: String,
     status: String,
@@ -941,6 +956,7 @@ pub async fn start_download(
     share: ResolvedShare,
     save_path: String,
     overwrite: bool,
+    message_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let target = PathBuf::from(save_path);
@@ -971,8 +987,15 @@ pub async fn start_download(
     let task_id = format!("{:032x}", rand::random::<u128>());
     let task = task_id.clone();
     let network = state.network.clone();
+    let messenger = state.messenger.clone();
+    if let Some(id) = &message_id {
+        messenger
+            .validate_media_download(id, &share.token)
+            .map_err(|e| e.to_string())?;
+    }
+    let media_target = target.clone();
     tokio::spawn(async move {
-        let _ = download_stream(
+        let result = download_stream(
             app,
             task,
             share.file_name,
@@ -985,6 +1008,12 @@ pub async fn start_download(
             network,
         )
         .await;
+        if result.is_ok() {
+            if let Some(id) = message_id {
+                let _ = messenger.set_download_status(&id, "completed");
+                let _ = messenger.set_local_media(&id, &media_target);
+            }
+        }
     });
     Ok(task_id)
 }

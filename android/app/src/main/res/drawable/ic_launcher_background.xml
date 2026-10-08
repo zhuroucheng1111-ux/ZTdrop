@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full-bleed PC blue-to-cyan gradient; the launcher supplies its own mask. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:angle="315" android:startColor="#4F46E5" android:endColor="#0891B2"/>
+</shape>

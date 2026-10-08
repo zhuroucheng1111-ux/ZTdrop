@@ -1,10 +1,10 @@
 {
   "name": "ztdrop",
   "private": true,
-  "version": "0.9.20",
+  "version": "1.0.0",
   "description": "ZTDrop：纯局域网文件传输与设备直连工具（Tauri 2 + React + Rust）",
   "license": "MIT",
-  "author": "zhuroucheng1111-ux",
+  "author": "zhuroucheng",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zhuroucheng1111-ux/ZTdrop.git"

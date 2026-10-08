@@ -10,3 +10,5 @@ pub mod share_manager;
 pub mod transfer;
 pub mod transport;
 pub mod web_share;
+
+pub mod chat_media;

@@ -7,6 +7,8 @@ import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import type { ChatMessage, CodeShareItem, FriendDevice, LocalNodeInfo, NetworkSnapshot, PeerDevice, ResolvedShare, SenderProgress, SessionView, TransferProgress, WebShareView } from "./types";
 import DirectPanel from "./DirectPanel";
 import WebSharePanel from "./WebSharePanel";
+import BottomSheet from "./BottomSheet";
+import ShareStatus, { type ShareReceiver } from "./ShareStatus";
 
 type MainTab = "transfer" | "direct" | "web";
 type TransferTab = "send" | "receive";
@@ -44,7 +46,7 @@ const LEGACY_DOWNLOAD_DIR_KEY = "ztbeam.download-directory";
 const STOP_MODE_KEY = "ztdrop.drain-on-stop";
 const LEGACY_STOP_MODE_KEY = "ztbeam.drain-on-stop";
 /** 与 package.json / Cargo.toml / tauri.conf.json 保持一致的候选版本号。 */
-const APP_VERSION = "0.9.20";
+const APP_VERSION = "1.0.0";
 /** 项目仓库与更新页面：只在“关于”面板里交给系统浏览器打开，应用本身不访问公网。 */
 const PROJECT_REPO_URL = "https://github.com/zhuroucheng1111-ux/ZTdrop";
 const PROJECT_RELEASES_URL = `${PROJECT_REPO_URL}/releases`;
@@ -63,6 +65,7 @@ export default function App() {
   const [peers, setPeers] = useState<PeerDevice[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [directAttachment, setDirectAttachment] = useState<{ id: number; paths: string[] } | null>(null);
+  const [codeSheetOpen, setCodeSheetOpen] = useState(false);
   const [activeShare, setActiveShare] = useState<CodeShareItem | null>(null);
   const [shareDeadline, setShareDeadline] = useState<number | null>(null);
   const [clock, setClock] = useState(() => Date.now());
@@ -77,7 +80,6 @@ export default function App() {
   const [incomingOffer, setIncomingOffer] = useState<IncomingOffer | null>(null);
   const [activeTransfer, setActiveTransfer] = useState<TransferProgress | null>(null);
   const [messageProgress, setMessageProgress] = useState<Record<string, TransferProgress>>({});
-  const [toastMessage, setToastMessage] = useState("");
   const [copySuccess, setCopySuccess] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsExpanded, setSettingsExpanded] = useState(false);
@@ -90,12 +92,7 @@ export default function App() {
   const [networkSettingBusy, setNetworkSettingBusy] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [logFilter, setLogFilter] = useState("");
-  /** 发送状态列表默认展开，可收起，列表本身限高滚动，不再挤压界面。 */
-  const [senderListOpen, setSenderListOpen] = useState(true);
-  /** 分享内容明细：默认收起，点击后在原位悬浮展开（不挤压界面）。 */
-  const [shareDetailsOpen, setShareDetailsOpen] = useState(false);
   const [shareFiles, setShareFiles] = useState<{ relative: string; size: number }[]>([]);
-  const shareContentRef = useRef<HTMLDivElement | null>(null);
   const [networkSnapshot, setNetworkSnapshot] = useState<NetworkSnapshot | null>(null);
   const [downloadDir, setDownloadDir] = useState(() => {
     try { return localStorage.getItem(DOWNLOAD_DIR_KEY) || localStorage.getItem(LEGACY_DOWNLOAD_DIR_KEY) || ""; }
@@ -111,21 +108,23 @@ export default function App() {
   const runningTasksRef = useRef<string[]>([]);
   const activeShareRef = useRef<CodeShareItem | null>(null);
   const invalidatedShares = useRef(new Set<string>());
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageTokens = useRef(new Map<string, string>());
   activeShareRef.current = activeShare;
 
-  function showToast(message: string) {
-    setToastMessage(message);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastMessage(""), 4000);
+  useEffect(() => {
+    setCodeSheetOpen(Boolean(activeShare));
+  }, [activeShare?.share_id]);
+
+  function reportStatus(message: string) {
+    // 保留业务结果供调试记录，移除旧版全局悬浮消息框。
+    console.info("[ZTDrop]", message);
   }
 
   async function openProjectPage(url: string) {
     try {
       await invoke("open_external_url", { url });
     } catch {
-      showToast("无法打开系统浏览器，请手动访问项目页面");
+      reportStatus("无法打开系统浏览器，请手动访问项目页面");
     }
   }
 
@@ -133,11 +132,11 @@ export default function App() {
     if (paths.length === 0) return;
     if (tab === "direct") { setDirectAttachment({ id: ++attachmentSeq.current, paths }); return; }
     if (activeShare || isPreparing || isStopping) {
-      showToast("请先结束当前分享");
+      reportStatus("请先结束当前分享");
       return;
     }
     if (tab === "web" && paths.length > 1) {
-      showToast("浏览器分享一次只能分享一个文件");
+      reportStatus("浏览器分享一次只能分享一个文件");
       return;
     }
     const seq = ++selectionSeq.current;
@@ -154,7 +153,7 @@ export default function App() {
       if (seq === selectionSeq.current) {
         if (invalidatedShares.current.delete(share.share_id)) {
           setSelectedPaths([]);
-          showToast("分享码已失效，请重新选择文件");
+          reportStatus("分享码已失效，请重新选择文件");
         } else {
           activeShareRef.current = share;
           setSenderTransfers({});
@@ -163,7 +162,7 @@ export default function App() {
         }
       }
     } catch (error) {
-      if (seq === selectionSeq.current) showToast("分享失败：" + String(error));
+      if (seq === selectionSeq.current) reportStatus("分享失败：" + String(error));
     } finally {
       if (seq === selectionSeq.current) setIsPreparing(false);
     }
@@ -191,20 +190,20 @@ export default function App() {
     try {
       if (drainOnStop) {
         await invoke("stop_session", { id: share.code, shareId: share.share_id, drain: true });
-        showToast("已设为传完再停：不再接受新连接，当前下载结束会自动收尾");
+        reportStatus("已设为传完再停：不再接受新连接，当前下载结束会自动收尾");
         return;
       }
       await invoke("stop_code_share", { code: share.code, shareId: share.share_id });
       clearShareCard();
-      showToast("分享已结束，当前下载已中断");
+      reportStatus("分享已结束，当前下载已中断");
     } catch (error) {
       const message = String(error);
       // 传完再停的分享可能已经被后端收尾，这时前端只要撤掉分享卡片。
       if (message.includes("分享已结束或不存在")) {
         clearShareCard();
-        showToast("分享已结束");
+        reportStatus("分享已结束");
       } else {
-        showToast("结束分享失败：" + message);
+        reportStatus("结束分享失败：" + message);
       }
     } finally {
       setIsStopping(false);
@@ -214,17 +213,18 @@ export default function App() {
   /// 统一的来源选择入口：多选文件，或选择单个文件夹。
   /// Windows 原生对话框无法在同一个框里既选文件又选文件夹，所以保留两种模式，
   /// 但只走这一条实现，不再有各自重复的代码。
-  async function pickSource(mode: "files" | "folder") {
+  async function pickSource(mode: "files" | "folder" | "images") {
     try {
       const selected = await open({
         directory: mode === "folder",
-        multiple: mode === "files",
-        title: mode === "folder" ? "选择文件夹" : "选择文件（可多选）",
+        multiple: mode !== "folder",
+        filters: mode === "images" ? [{ name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }] : undefined,
+        title: mode === "folder" ? "选择文件夹" : mode === "images" ? "选择图片（可多选）" : "选择文件（可多选）",
       }) as string | string[] | null;
       if (typeof selected === "string") await useSource([selected], mainTab);
       else if (Array.isArray(selected) && selected.length > 0) await useSource(selected, mainTab);
     } catch (error) {
-      showToast("无法选择文件：" + String(error));
+      reportStatus("无法选择文件：" + String(error));
     }
   }
 
@@ -248,7 +248,7 @@ export default function App() {
         messageTokens.current.delete(event.payload.token);
         void invoke("set_message_download_status", { messageId, status: event.payload.status }).catch(console.error);
       }
-      if (event.payload.status === "error") showToast("传输失败：" + (event.payload.error_msg || "未知错误"));
+      if (event.payload.status === "error") reportStatus("传输失败：" + (event.payload.error_msg || "未知错误"));
     });
     const senderListener = listen<SenderProgress>("sender-progress", (event) => {
       setSenderTransfers((current) => ({ ...current, [event.payload.transfer_id]: event.payload }));
@@ -260,19 +260,19 @@ export default function App() {
         setActiveShare(null);
         setShareDeadline(null);
         setSelectedPaths([]);
-        showToast(event.payload.reason);
+        reportStatus(event.payload.reason);
       }
     });
     const offerListener = listen<IncomingOffer>("direct-offer", (event) => {
       setIncomingOffer(event.payload);
       setMainTab("direct");
-      showToast(event.payload.from_device_name + " 向你发送文件");
+      reportStatus(event.payload.from_device_name + " 向你发送文件");
     });
     // 后端把“传完再停”的分享收尾后，前端同步撤掉分享卡片。
     const shareEndedListener = listen<{ id: string; reason: string }>("share-ended", (event) => {
       if (activeShareRef.current?.code === event.payload.id) {
         clearShareCard();
-        showToast("分享已结束");
+        reportStatus("分享已结束");
       }
     });
     return () => {
@@ -282,7 +282,6 @@ export default function App() {
       invalidatedListener.then((unlisten) => unlisten());
       offerListener.then((unlisten) => unlisten());
       shareEndedListener.then((unlisten) => unlisten());
-      if (toastTimer.current) clearTimeout(toastTimer.current);
     };
   }, []);
 
@@ -303,7 +302,7 @@ export default function App() {
     }).then((cleanup) => {
       if (disposed) cleanup();
       else unlisten = cleanup;
-    }).catch((error) => showToast("拖放功能不可用：" + String(error)));
+    }).catch((error) => reportStatus("拖放功能不可用：" + String(error)));
     return () => {
       disposed = true;
       unlisten?.();
@@ -317,7 +316,7 @@ export default function App() {
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     } catch (error) {
-      showToast("复制失败：" + String(error));
+      reportStatus("复制失败：" + String(error));
     }
   }
 
@@ -326,14 +325,14 @@ export default function App() {
       const selected = await open({ directory: true, multiple: false, title: "选择默认下载目录" });
       if (typeof selected !== "string") return;
       if (!await invoke<boolean>("directory_exists", { path: selected })) {
-        showToast("所选目录不可用");
+        reportStatus("所选目录不可用");
         return;
       }
       localStorage.setItem(DOWNLOAD_DIR_KEY, selected);
       setDownloadDir(selected);
-      showToast("已设置默认下载目录");
+      reportStatus("已设置默认下载目录");
     } catch (error) {
-      showToast("设置下载目录失败：" + String(error));
+      reportStatus("设置下载目录失败：" + String(error));
     }
   }
 
@@ -341,9 +340,9 @@ export default function App() {
     try {
       localStorage.removeItem(DOWNLOAD_DIR_KEY);
       setDownloadDir("");
-      showToast("已恢复每次选择保存位置");
+      reportStatus("已恢复每次选择保存位置");
     } catch (error) {
-      showToast("清除设置失败：" + String(error));
+      reportStatus("清除设置失败：" + String(error));
     }
   }
 
@@ -354,9 +353,9 @@ export default function App() {
       setPhysicalLanOnly(enabled);
       setLocalInfo(await invoke<LocalNodeInfo>("get_local_node_info"));
       if (diagnosticsOpen) await refreshDiagnostics();
-      showToast(enabled ? "已仅使用物理局域网" : "已使用系统网络路由");
+      reportStatus(enabled ? "已仅使用物理局域网" : "已使用系统网络路由");
     } catch (error) {
-      showToast("更新网卡设置失败：" + String(error));
+      reportStatus("更新网卡设置失败：" + String(error));
     } finally {
       setNetworkSettingBusy(false);
     }
@@ -366,7 +365,7 @@ export default function App() {
     try {
       setNetworkSnapshot(await invoke<NetworkSnapshot>("get_network_diagnostics"));
     } catch (error) {
-      showToast("读取网络诊断失败：" + String(error));
+      reportStatus("读取网络诊断失败：" + String(error));
     }
   }
 
@@ -380,9 +379,9 @@ export default function App() {
       });
       if (typeof path !== "string") return;
       await invoke("export_diagnostics", { path });
-      showToast("诊断报告已导出");
+      reportStatus("诊断报告已导出");
     } catch (error) {
-      showToast("导出诊断报告失败：" + String(error));
+      reportStatus("导出诊断报告失败：" + String(error));
     }
   }
 
@@ -391,10 +390,10 @@ export default function App() {
     const drain = session.state === "draining" ? false : drainOnStop;
     try {
       await invoke("stop_session", { id: session.resource_id, shareId: session.share_id, drain });
-      showToast(drain ? "已设为传完再停，当前传输结束会自动收尾" : "已停止该分享");
+      reportStatus(drain ? "已设为传完再停，当前传输结束会自动收尾" : "已停止该分享");
       await refreshDiagnostics();
     } catch (error) {
-      showToast("停止分享失败：" + String(error));
+      reportStatus("停止分享失败：" + String(error));
     }
   }
 
@@ -411,10 +410,10 @@ export default function App() {
     if (!confirmed) return;
     try {
       const count = await invoke<number>("stop_all_sessions", { drain: drainOnStop });
-      showToast(drainOnStop ? `已设为传完再停：${count} 个会话` : `已停止 ${count} 个分享会话`);
+      reportStatus(drainOnStop ? `已设为传完再停：${count} 个会话` : `已停止 ${count} 个分享会话`);
       await refreshDiagnostics();
     } catch (error) {
-      showToast("停止全部分享失败：" + String(error));
+      reportStatus("停止全部分享失败：" + String(error));
     }
   }
 
@@ -461,7 +460,7 @@ export default function App() {
         try {
           await invoke(terminate ? "quit_app" : "hide_to_tray");
         } catch (error) {
-          showToast("操作失败：" + String(error));
+          reportStatus("操作失败：" + String(error));
         }
       })();
     });
@@ -484,23 +483,11 @@ export default function App() {
 
   // 分享开始时读取内容清单，供"点击展开详情"使用。
   useEffect(() => {
-    if (!activeShare) { setShareFiles([]); setShareDetailsOpen(false); return; }
+    if (!activeShare) { setShareFiles([]); return; }
     invoke<{ relative: string; size: number }[]>("get_share_files", { code: activeShare.code })
       .then(setShareFiles)
       .catch(() => setShareFiles([]));
   }, [activeShare?.share_id]);
-
-  // 点击明细之外的地方收起悬浮层。
-  useEffect(() => {
-    if (!shareDetailsOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (target && shareContentRef.current?.contains(target)) return;
-      setShareDetailsOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [shareDetailsOpen]);
 
   // 接收完成后 5 秒自动收起状态卡片，避免长期占用窗口（错误状态保留给用户查看）。
   useEffect(() => {
@@ -509,12 +496,12 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [activeTransfer?.status, activeTransfer?.task_id]);
 
-  async function receiveShare(share: ResolvedShare): Promise<string | null> {
+  async function receiveShare(share: ResolvedShare, messageId?: string): Promise<string | null> {
     let savePath: string | null;
     if (downloadDir) {
       if (!await invoke<boolean>("directory_exists", { path: downloadDir })) {
         setSettingsOpen(true);
-        showToast("默认下载目录不可用，请重新选择");
+        reportStatus("默认下载目录不可用，请重新选择");
         return null;
       }
       savePath = await join(downloadDir, share.file_name);
@@ -533,8 +520,8 @@ export default function App() {
         )
       : false;
     if (exists && !overwrite) return null;
-    const taskId = await invoke<string>("start_download", { share, savePath, overwrite });
-    showToast("开始接收：" + share.file_name);
+    const taskId = await invoke<string>("start_download", { share, savePath, overwrite, messageId });
+    reportStatus("开始接收：" + share.file_name);
     return taskId;
   }
 
@@ -545,7 +532,7 @@ export default function App() {
       const share = await invoke<ResolvedShare>("resolve_code", { code: inputCode });
       if (await receiveShare(share)) setInputCode("");
     } catch (error) {
-      showToast("接收失败：" + String(error));
+      reportStatus("接收失败：" + String(error));
     } finally {
       setIsResolving(false);
     }
@@ -557,19 +544,19 @@ export default function App() {
     try {
       if (await receiveShare(offer)) setIncomingOffer(null);
     } catch (error) {
-      showToast("接收失败：" + String(error));
+      reportStatus("接收失败：" + String(error));
     }
   }
 
   async function downloadMessage(message: ChatMessage, friend: FriendDevice) {
     const peer = peers.find((item) => item.node_id === friend.device_id);
-    if (!peer || !message.token || !message.file_name) { showToast("发送设备当前离线"); return; }
+    if (!peer || !message.token || !message.file_name) { reportStatus("发送设备当前离线"); return; }
     messageTokens.current.set(message.token, message.message_id);
     try {
       const taskId = await receiveShare({ token: message.token, file_name: message.file_name,
-        file_size: message.file_size || 0, is_folder: message.is_folder, address: `${peer.ip}:${peer.port}` });
+        file_size: message.file_size || 0, is_folder: message.is_folder, address: `${peer.ip}:${peer.port}` }, message.message_id);
       if (!taskId) messageTokens.current.delete(message.token);
-    } catch (error) { messageTokens.current.delete(message.token); showToast("下载失败：" + String(error)); }
+    } catch (error) { messageTokens.current.delete(message.token); reportStatus("下载失败：" + String(error)); }
   }
 
   const transferBusy = activeTransfer && !["completed", "error", "idle"].includes(activeTransfer.status);
@@ -577,6 +564,24 @@ export default function App() {
     ? Math.min(100, Math.round(activeTransfer.transferred / activeTransfer.total * 100))
     : 0;
   const currentSenders = Object.values(senderTransfers).filter((transfer) => transfer.share_id === activeShare?.share_id);
+  // 多个分段连接属于同一接收设备，不计成多台设备。
+  const receiverGroups = new Map<string, ShareReceiver>();
+  for (const transfer of currentSenders) {
+    const group = receiverGroups.get(transfer.peer_ip);
+    if (!group) receiverGroups.set(transfer.peer_ip, {
+      id: transfer.peer_ip, name: transfer.peer_name, ip: transfer.peer_ip,
+      transferred: transfer.transferred, total: transfer.total,
+      speed: transfer.status === "sending" ? transfer.speed_mb : 0, status: transfer.status,
+    });
+    else {
+      group.transferred += transfer.transferred;
+      group.total += transfer.total;
+      group.speed = (group.speed ?? 0) + (transfer.status === "sending" ? transfer.speed_mb : 0);
+      if (transfer.status === "sending" || group.status !== "sending" && transfer.status === "error") group.status = transfer.status;
+    }
+  }
+  const shareReceivers = [...receiverGroups.values()];
+  const sendingDevices = shareReceivers.filter((receiver) => receiver.status === "sending").length;
   const activeSettingsSection: SettingsSection | null = settingsSection ?? settingsPreview;
   function runningTasks(): string[] {
     const items: string[] = [];
@@ -624,32 +629,10 @@ export default function App() {
               <div className="send-content">
                 <div className={["drop-zone", isDragging && !activeShare ? "dragging" : "", activeShare ? "sharing" : ""].filter(Boolean).join(" ")}>
                   {activeShare ? <>
-                    <span className="sharing-indicator"><span className="share-pulse" aria-hidden="true" />正在分享</span>
-                    <div className="share-content-wrap" ref={shareContentRef}>
-                      <button className={shareDetailsOpen ? "share-content open" : "share-content"} onClick={() => setShareDetailsOpen((open) => !open)} aria-expanded={shareDetailsOpen} title="点击查看分享内容明细">
-                        <span className="file-bubble-icon" aria-hidden="true">{activeShare.is_folder ? "▣" : "▤"}</span>
-                        <span className="share-content-name">{activeShare.file_name}</span>
-                        <span className="share-content-meta">{activeShare.file_size > 0 ? formatBytes(activeShare.file_size) : "文件夹"}{shareFiles.length > 1 ? ` · ${shareFiles.length} 项` : ""}</span>
-                        <span className="share-content-chevron" aria-hidden="true">{shareDetailsOpen ? "▴" : "▾"}</span>
-                      </button>
-                      {shareDetailsOpen && <div className="share-details" role="dialog" aria-label="分享内容明细">
-                        <div className="share-details-head"><strong>分享内容</strong><span>{shareFiles.length ? `${shareFiles.length} 个文件` : "读取中…"}</span></div>
-                        <div className="share-details-list">
-                          {shareFiles.length
-                            ? shareFiles.map((file, index) => <div className="share-details-row" key={file.relative + index}><span title={file.relative}>{file.relative}</span><span>{formatBytes(file.size)}</span></div>)
-                            : <div className="share-details-empty">正在读取清单…</div>}
-                          {shareFiles.length >= 500 && <div className="share-details-empty">仅显示前 500 项</div>}
-                        </div>
-                        <div className="share-details-foot">{activeShare.is_folder ? "接收方会保存为一个文件夹" : "单文件分享"}</div>
-                      </div>}
-                    </div>
-                    <div className="share-code-row">
-                      <strong className="share-code">{activeShare.code}</strong>
-                      <button className="small-button outline-green" onClick={copyCode}>{copySuccess ? "已复制" : "复制"}</button>
-                    </div>
-                    <span className="expiry">{shareRemainingText}</span>
-                    <div className="share-activity" aria-hidden="true"><span /></div>
-                    <p className="share-waiting">{currentSenders.length === 0 ? "等待设备连接……" : `正在发送给 ${currentSenders.length} 台设备`}</p>
+                    <span className="sharing-indicator"><span className="share-pulse" aria-hidden="true" />分享正在进行</span>
+                    <strong>{activeShare.file_name}</strong>
+                    <span>分享码 {activeShare.code} · {shareRemainingText}</span>
+                    <button className="primary-button" onClick={() => setCodeSheetOpen(true)}>查看分享</button>
                   </> : <>
                     <UploadIcon />
                     <strong>{isDragging ? "松开即可分享" : "拖放文件或文件夹"}</strong>
@@ -662,24 +645,16 @@ export default function App() {
                   ) : <button className="small-button dark" onClick={() => pickSource("files")}>分享文件</button>}
                 </div>
                 {!activeShare && <p className="browse-hint">支持一次选多个文件；文件夹直接拖进窗口即可分享</p>}
-                {activeShare && currentSenders.length > 0 && (
-                  <div className="sender-progress-list">
-                    <button className="section-title sender-list-toggle" onClick={() => setSenderListOpen((open) => !open)} aria-expanded={senderListOpen}>
-                      <span>发送状态（{currentSenders.length}）</span>
-                      <span className="toggle-hint">{senderListOpen ? "收起" : "展开"}</span>
-                    </button>
-                    {senderListOpen && <div className="sender-progress-scroll">
-                      {currentSenders.map((transfer) => {
-                        const ratio = transfer.total ? Math.min(100, Math.round(transfer.transferred / transfer.total * 100)) : 100;
-                        return <div className="sender-progress" key={transfer.transfer_id}>
-                          <div className="sender-progress-heading"><strong>{transfer.peer_name}</strong><span>{transfer.status === "sending" ? `${ratio}% · ${transfer.speed_mb.toFixed(1)} MB/s` : transfer.status === "completed" ? "发送完成" : transfer.status === "stopped" ? "已停止" : "发送失败"}</span></div>
-                          <div className="sender-progress-detail" title={transfer.peer_ip}>{transfer.file_name} · {formatBytes(transfer.transferred)} / {formatBytes(transfer.total)}</div>
-                          <div className="progress-track"><div className="progress-fill" style={{ width: ratio + "%", background: transfer.status === "error" || transfer.status === "stopped" ? "#e35d5d" : transfer.status === "completed" ? "#36a674" : undefined }} /></div>
-                        </div>;
-                      })}
-                    </div>}
-                  </div>
-                )}
+                <BottomSheet open={codeSheetOpen && Boolean(activeShare) && mainTab === "transfer" && transferTab === "send"}
+                  title="码连分享" onClose={() => setCodeSheetOpen(false)}>
+                  {activeShare && <ShareStatus
+                    files={shareFiles.length ? shareFiles.map((file) => ({ name: file.relative || activeShare.file_name, size: file.size })) : [{ name: activeShare.file_name, size: activeShare.file_size }]}
+                    receivers={shareReceivers} code={activeShare.code} remaining={shareRemainingText}
+                    visitors={shareReceivers.length} downloads={sendingDevices}
+                    stopMode={drainOnStop ? "传完再停" : "手动结束"} busy={isStopping} copied={copySuccess}
+                    onCopy={() => void copyCode()} onStop={() => void stopShare()} />}
+
+                </BottomSheet>
               </div>
             ) : (
               <div className="receive-content">
@@ -708,11 +683,11 @@ export default function App() {
             onClearTransfer={() => setActiveTransfer(null)}
             isDragging={isDragging} incomingOffer={incomingOffer}
             onPick={(mode) => void pickSource(mode)} onClearAttachment={() => setDirectAttachment(null)} onAcceptOffer={() => void acceptOffer()}
-            onRejectOffer={() => setIncomingOffer(null)} onDownload={downloadMessage} showToast={showToast} />
+            onRejectOffer={() => setIncomingOffer(null)} onDownload={downloadMessage} reportStatus={reportStatus} />
         </div>
         <div className="panel-slide" aria-hidden={mainTab !== "web"}>
           <WebSharePanel selectedFilePath={selectedPaths[0] ?? ""} isDragging={isDragging}
-            onPick={() => void pickSource("files")} showToast={showToast} share={webShare} setShare={setWebShare} drainOnStop={drainOnStop} />
+            onPick={() => void pickSource("files")} reportStatus={reportStatus} share={webShare} setShare={setWebShare} drainOnStop={drainOnStop} visible={mainTab === "web"} />
         </div></div></div>
         {mainTab !== "direct" && activeTransfer && !messageProgress[activeTransfer.token] && activeTransfer.status !== "idle" && (
           <div className="transfer-status">
@@ -812,7 +787,6 @@ export default function App() {
         </section>
       )}
       {isDragging && <div className="drop-overlay" aria-hidden="true">松开以添加文件</div>}
-      {toastMessage && <div className="toast" role="status">{toastMessage}</div>}
     </div>
   );
 }

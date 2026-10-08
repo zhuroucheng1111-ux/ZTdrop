@@ -395,6 +395,62 @@ where
     result
 }
 
+#[derive(Debug)]
+struct TransferRequest {
+    index: usize,
+    offset: u64,
+    length: u64,
+}
+
+// The manifest advertises range_requests=1; old clients keep the 12-byte request format.
+fn parse_transfer_requests(
+    raw: &[u8],
+    ranged: bool,
+    files: &[FileEntry],
+) -> Result<Vec<TransferRequest>> {
+    let width = if ranged { 20 } else { 12 };
+    if raw.len() % width != 0 || raw.len() / width > MAX_FILES {
+        bail!("请求记录数量或长度无效");
+    }
+    let mut requests = Vec::with_capacity(raw.len() / width);
+    let mut intervals: std::collections::HashMap<usize, Vec<(u64, u64)>> =
+        std::collections::HashMap::new();
+    let mut seen = std::collections::HashSet::new();
+    for record in raw.chunks_exact(width) {
+        let index = u32::from_be_bytes(record[..4].try_into()?) as usize;
+        let offset = u64::from_be_bytes(record[4..12].try_into()?);
+        let entry = files.get(index).context("请求文件序号无效")?;
+        if offset > entry.size {
+            bail!("续传位置超出文件大小");
+        }
+        let length = if ranged {
+            u64::from_be_bytes(record[12..20].try_into()?)
+        } else {
+            entry.size - offset
+        };
+        let end = offset.checked_add(length).context("分段范围溢出")?;
+        if end > entry.size || (ranged && length == 0) {
+            bail!("分段范围无效");
+        }
+        if !ranged && !seen.insert(index) {
+            bail!("重复文件序号");
+        }
+        intervals.entry(index).or_default().push((offset, end));
+        requests.push(TransferRequest {
+            index,
+            offset,
+            length,
+        });
+    }
+    for values in intervals.values_mut() {
+        values.sort_unstable();
+        if values.windows(2).any(|pair| pair[0].1 > pair[1].0) {
+            bail!("分段范围重叠");
+        }
+    }
+    Ok(requests)
+}
+
 async fn serve_active_connection(
     stream: &mut TcpStream,
     item: &crate::engine::code_share::CodeShareItem,
@@ -407,7 +463,9 @@ async fn serve_active_connection(
     let manifest = cached
         .as_ref()
         .map_err(|err| anyhow::anyhow!(err.clone()))?;
-    let manifest_bytes = serde_json::to_vec(manifest.as_ref())?;
+    let mut wire_manifest = serde_json::to_value(manifest.as_ref())?;
+    wire_manifest["range_requests"] = serde_json::json!(1);
+    let manifest_bytes = serde_json::to_vec(&wire_manifest)?;
     if manifest_bytes.len() > MAX_MANIFEST_BYTES {
         stream.write_all(&[0]).await?;
         bail!("文件夹清单过大，请分批分享");
@@ -418,36 +476,31 @@ async fn serve_active_connection(
         .await?;
     stream.write_all(&manifest_bytes).await?;
 
-    let count = timeout(Duration::from_secs(60), stream.read_u32()).await?? as usize;
-    if count > manifest.files.len() {
+    let first = timeout(Duration::from_secs(60), stream.read_u32()).await??;
+    let ranged = first == u32::MAX;
+    let count = if ranged {
+        timeout(Duration::from_secs(60), stream.read_u32()).await??
+    } else {
+        first
+    } as usize;
+    if count > MAX_FILES || (!ranged && count > manifest.files.len()) {
         bail!("请求文件数量无效");
     }
-    let mut requests = vec![0u8; count * 12];
-    timeout(Duration::from_secs(60), stream.read_exact(&mut requests)).await??;
-    let mut seen = std::collections::HashSet::new();
-    let mut total = 0u64;
-    for request in requests.chunks_exact(12) {
-        let index = u32::from_be_bytes(request[..4].try_into()?) as usize;
-        let offset = u64::from_be_bytes(request[4..].try_into()?);
-        if index >= manifest.files.len() || !seen.insert(index) {
-            bail!("请求文件序号无效");
-        }
-        let entry = &manifest.files[index];
-        if offset > entry.size {
-            bail!("续传位置超出文件大小");
-        }
-        total = total
-            .checked_add(entry.size - offset)
-            .context("传输大小超出支持范围")?;
-    }
+    let mut raw = vec![0u8; count * if ranged { 20 } else { 12 }];
+    timeout(Duration::from_secs(60), stream.read_exact(&mut raw)).await??;
+    let requests = parse_transfer_requests(&raw, ranged, &manifest.files)?;
+    let total = requests
+        .iter()
+        .try_fold(0u64, |total, request| total.checked_add(request.length))
+        .context("传输大小超出支持范围")?;
     let mut transferred = 0u64;
     let started = Instant::now();
     let mut last_report = Instant::now();
     report(0, total, 0.0);
-    for request in requests.chunks_exact(12) {
-        let index = u32::from_be_bytes(request[..4].try_into()?) as usize;
-        let offset = u64::from_be_bytes(request[4..].try_into()?);
-        let entry = &manifest.files[index];
+    for request in requests {
+        let offset = request.offset;
+        let end = offset + request.length;
+        let entry = &manifest.files[request.index];
         let path = entry
             .source_path
             .as_ref()
@@ -465,8 +518,8 @@ async fn serve_active_connection(
         stream.write_all(&[1]).await?;
         let mut sent = offset;
         let mut buffer = vec![0u8; CHUNK_SIZE];
-        while sent < entry.size {
-            let remaining = (entry.size - sent).min(CHUNK_SIZE as u64) as usize;
+        while sent < end {
+            let remaining = (end - sent).min(CHUNK_SIZE as u64) as usize;
             let read = file.read(&mut buffer[..remaining]).await?;
             if read == 0 {
                 bail!("发送期间原文件被截断");
@@ -611,7 +664,9 @@ where
     timeout(Duration::from_secs(60), stream.read_exact(&mut bytes))
         .await
         .context("读取发送端清单超时")??;
-    let manifest: Manifest = serde_json::from_slice(&bytes)?;
+    let wire: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let supports_ranges = wire.get("range_requests").and_then(|v| v.as_u64()) == Some(1);
+    let manifest: Manifest = serde_json::from_value(wire)?;
     if manifest.is_folder != is_folder || manifest.files.len() > MAX_FILES {
         bail!("发送端清单与分享信息不一致");
     }
@@ -668,6 +723,20 @@ where
             target,
             partial,
         });
+    }
+    // Legacy contiguous .part files keep their existing resume semantics.
+    if supports_ranges
+        && !is_folder
+        && plan.len() == 1
+        && plan[0].offset == 0
+        && total >= 8 * 1024 * 1024
+    {
+        let item = plan.remove(0);
+        let entry = &manifest.files[item.index];
+        receive_segmented(stream, address, network, token, &item, entry, &mut report).await?;
+        commit_received_file(&item, entry, overwrite).await?;
+        report("saving", total, total, 0.0);
+        return Ok(());
     }
     report("transferring", progress, total, 0.0);
     let mut request = Vec::with_capacity(4 + plan.len() * 12);
@@ -728,37 +797,274 @@ where
         }
         output.flush().await?;
         drop(output);
-        let backup = item
-            .target
-            .with_file_name(format!(".ztdrop-{:032x}.backup", rand::random::<u128>()));
-        if item.target.exists() {
-            if !overwrite {
-                bail!("传输期间目标文件已出现，未覆盖原文件");
-            }
-            if item.target.is_dir() {
-                bail!("目标路径已有同名文件夹，无法覆盖为文件");
-            }
-            tokio::fs::rename(&item.target, &backup)
-                .await
-                .context("无法备份原文件，未覆盖")?;
-        }
-        if let Err(err) = tokio::fs::rename(&item.partial, &item.target).await {
-            if backup.exists() {
-                let _ = tokio::fs::rename(&backup, &item.target).await;
-            }
-            return Err(err).context("保存接收文件失败");
-        }
-        let _ = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&item.target)
-            .and_then(|file| {
-                file.set_modified(UNIX_EPOCH + Duration::from_millis(entry.modified_ms))
-            });
-        if backup.exists() {
-            let _ = tokio::fs::remove_file(&backup).await;
-        }
+        commit_received_file(&item, entry, overwrite).await?;
     }
     report("saving", total, total, 0.0);
+    Ok(())
+}
+
+const SEGMENT_BYTES: u64 = 4 * 1024 * 1024;
+const SEGMENT_CONNECTIONS: usize = 4;
+
+struct SegmentPlan {
+    offset: u64,
+    length: u64,
+    completed: u64,
+    path: PathBuf,
+}
+
+async fn connect_segment_stream(
+    address: SocketAddr,
+    network: Option<&NetworkPolicy>,
+    token: &str,
+    entry: &FileEntry,
+) -> Result<TcpStream> {
+    let mut stream = timeout(Duration::from_secs(5), async {
+        match network {
+            Some(policy) => policy.connect_tcp(address).await,
+            None => Ok(TcpStream::connect(address).await?),
+        }
+    })
+    .await
+    .context("连接分段发送端超时")??;
+    stream.set_nodelay(true)?;
+    stream.write_all(PROTOCOL_MAGIC).await?;
+    stream.write_all(token.as_bytes()).await?;
+    let status = timeout(Duration::from_secs(60), stream.read_u8()).await??;
+    if status != 1 {
+        bail!("发送端拒绝分段连接");
+    }
+    let len = timeout(Duration::from_secs(60), stream.read_u32()).await?? as usize;
+    if len == 0 || len > MAX_MANIFEST_BYTES {
+        bail!("分段清单大小无效");
+    }
+    let mut bytes = vec![0u8; len];
+    timeout(Duration::from_secs(60), stream.read_exact(&mut bytes)).await??;
+    let wire: serde_json::Value = serde_json::from_slice(&bytes)?;
+    if wire.get("range_requests").and_then(|v| v.as_u64()) != Some(1) {
+        bail!("发送端不支持分段请求");
+    }
+    let manifest: Manifest = serde_json::from_value(wire)?;
+    if manifest.is_folder
+        || manifest.files.len() != 1
+        || manifest.files[0].size != entry.size
+        || manifest.files[0].modified_ms != entry.modified_ms
+    {
+        bail!("分段连接的源文件已变化");
+    }
+    Ok(stream)
+}
+
+async fn receive_segmented<F>(
+    stream: TcpStream,
+    address: SocketAddr,
+    network: Option<&NetworkPolicy>,
+    token: &str,
+    item: &FilePlan,
+    entry: &FileEntry,
+    report: &mut F,
+) -> Result<()>
+where
+    F: FnMut(&str, u64, u64, f64),
+{
+    use std::sync::atomic::{AtomicU64, Ordering};
+    if let Some(parent) = item.target.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    // Bound request records and sidecar count even for very large files.
+    let segment_size = SEGMENT_BYTES.max(
+        entry
+            .size
+            .div_ceil(MAX_FILES as u64 * SEGMENT_CONNECTIONS as u64),
+    );
+    let mut segments = Vec::new();
+    let mut persisted = 0;
+    let mut offset = 0;
+    while offset < entry.size {
+        let length = segment_size.min(entry.size - offset);
+        let path = item
+            .partial
+            .with_extension(format!("segment-{}", segments.len()));
+        let completed = match tokio::fs::metadata(&path).await {
+            Ok(meta) if meta.is_file() && meta.len() <= length => meta.len(),
+            Ok(_) => bail!("分段临时文件长度或类型无效"),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(err) => return Err(err.into()),
+        };
+        persisted += completed;
+        segments.push(SegmentPlan {
+            offset,
+            length,
+            completed,
+            path,
+        });
+        offset += length;
+    }
+    report("transferring", persisted, entry.size, 0.0);
+    let progress = Arc::new(AtomicU64::new(persisted));
+    let pending: Vec<_> = segments
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.completed < s.length)
+        .map(|(i, _)| i)
+        .collect();
+    let workers = pending.len().min(SEGMENT_CONNECTIONS);
+    let mut streams = vec![stream];
+    for _ in 1..workers {
+        streams.push(connect_segment_stream(address, network, token, entry).await?);
+    }
+    let mut tasks = tokio::task::JoinSet::new();
+    if workers == 0 {
+        streams[0].write_u32(0).await?;
+    }
+    for (worker, mut stream) in streams.into_iter().enumerate().take(workers) {
+        let group: Vec<_> = pending
+            .iter()
+            .skip(worker)
+            .step_by(workers)
+            .map(|&i| {
+                let s = &segments[i];
+                (
+                    s.offset + s.completed,
+                    s.length - s.completed,
+                    s.completed,
+                    s.path.clone(),
+                )
+            })
+            .collect();
+        let progress = progress.clone();
+        let index = item.index;
+        tasks.spawn(async move {
+            stream.write_u32(u32::MAX).await?;
+            stream.write_u32(group.len() as u32).await?;
+            for (offset, length, _, _) in &group {
+                stream.write_u32(index as u32).await?;
+                stream.write_u64(*offset).await?;
+                stream.write_u64(*length).await?;
+            }
+            for (_, length, completed, path) in group {
+                if timeout(Duration::from_secs(30), stream.read_u8()).await?? != 1 {
+                    bail!("发送端原文件已变化");
+                }
+                let mut file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .await?;
+                if file.metadata().await?.len() != completed {
+                    bail!("分段临时文件被其他任务修改");
+                }
+                let mut remaining = length;
+                let mut buffer = vec![0u8; CHUNK_SIZE];
+                while remaining > 0 {
+                    let limit = remaining.min(buffer.len() as u64) as usize;
+                    let count = timeout(Duration::from_secs(30), stream.read(&mut buffer[..limit]))
+                        .await
+                        .context("分段读取超时")??;
+                    if count == 0 {
+                        bail!("分段连接中断，已保留断点");
+                    }
+                    file.write_all(&buffer[..count]).await?;
+                    // Count only bytes committed to the file, never preallocated length.
+                    file.flush().await?;
+                    progress.fetch_add(count as u64, Ordering::Relaxed);
+                    remaining -= count as u64;
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        });
+    }
+    let started = Instant::now();
+    let mut ticker = tokio::time::interval(Duration::from_millis(200));
+    let result = async {
+        while !tasks.is_empty() {
+            tokio::select! {
+                joined = tasks.join_next() => { joined.context("分段任务丢失")???; }
+                _ = ticker.tick() => {
+                    let done = progress.load(Ordering::Relaxed);
+                    report("transferring", done, entry.size, (done - persisted) as f64 / started.elapsed().as_secs_f64().max(0.001) / 1048576.0);
+                }
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    }.await;
+    if let Err(err) = result {
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+        report(
+            "transferring",
+            progress.load(Ordering::Relaxed),
+            entry.size,
+            0.0,
+        );
+        return Err(err);
+    }
+    report("saving", entry.size, entry.size, 0.0);
+    // A distinct merge file must never look like a valid contiguous legacy resume prefix.
+    let merge = item.partial.with_extension("merge");
+    let mut output = File::create(&merge).await?;
+    for segment in &segments {
+        let mut input = File::open(&segment.path).await?;
+        if input.metadata().await?.len() != segment.length {
+            bail!("分段尚未完整，保留断点");
+        }
+        let copied = tokio::io::copy(&mut input, &mut output).await?;
+        if copied != segment.length {
+            bail!("合并期间分段发生变化");
+        }
+    }
+    output.flush().await?;
+    output.sync_all().await?;
+    drop(output);
+    // The old contiguous partial is empty in this path. Remove it before Windows rename.
+    if item.partial.exists() {
+        tokio::fs::remove_file(&item.partial).await?;
+    }
+    tokio::fs::rename(&merge, &item.partial).await?;
+    // Delete segment sidecars only after the target has been committed by the caller.
+    Ok(())
+}
+
+async fn commit_received_file(item: &FilePlan, entry: &FileEntry, overwrite: bool) -> Result<()> {
+    let backup = item
+        .target
+        .with_file_name(format!(".ztdrop-{:032x}.backup", rand::random::<u128>()));
+    if item.target.exists() {
+        if !overwrite {
+            bail!("传输期间目标文件已出现，未覆盖原文件");
+        }
+        if item.target.is_dir() {
+            bail!("目标路径已有同名文件夹，无法覆盖为文件");
+        }
+        tokio::fs::rename(&item.target, &backup)
+            .await
+            .context("无法备份原文件，未覆盖")?;
+    }
+    if let Err(err) = tokio::fs::rename(&item.partial, &item.target).await {
+        if backup.exists() {
+            let _ = tokio::fs::rename(&backup, &item.target).await;
+        }
+        return Err(err).context("保存接收文件失败");
+    }
+    let _ = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&item.target)
+        .and_then(|file| file.set_modified(UNIX_EPOCH + Duration::from_millis(entry.modified_ms)));
+    if backup.exists() {
+        let _ = tokio::fs::remove_file(&backup).await;
+    }
+    // Sidecars are keyed by the same source metadata as the sequential partial.
+    let segment_size = SEGMENT_BYTES.max(
+        entry
+            .size
+            .div_ceil(MAX_FILES as u64 * SEGMENT_CONNECTIONS as u64),
+    );
+    for index in 0..entry.size.div_ceil(segment_size) {
+        let path = item.partial.with_extension(format!("segment-{index}"));
+        if path.exists() {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+    }
     Ok(())
 }
 
@@ -1274,6 +1580,327 @@ mod tests {
             tokio::fs::read(target.join("b.txt")).await?,
             b"short and the rest"
         );
+        tokio::fs::remove_dir_all(root).await?;
+        Ok(())
+    }
+    #[test]
+    fn range_request_bounds_and_overlap() {
+        let entries = vec![FileEntry {
+            relative: String::new(),
+            size: 1024,
+            modified_ms: 0,
+            source_path: None,
+        }];
+        let encode = |start: u64, length: u64| {
+            let mut bytes = 0u32.to_be_bytes().to_vec();
+            bytes.extend_from_slice(&start.to_be_bytes());
+            bytes.extend_from_slice(&length.to_be_bytes());
+            bytes
+        };
+        assert_eq!(
+            parse_transfer_requests(&encode(100, 200), true, &entries).unwrap()[0].length,
+            200
+        );
+        assert!(parse_transfer_requests(&encode(1000, 25), true, &entries).is_err());
+        assert!(parse_transfer_requests(&encode(u64::MAX, 1), true, &entries).is_err());
+        assert!(parse_transfer_requests(&encode(0, 0), true, &entries).is_err());
+        let mut duplicate = encode(0, 200);
+        duplicate.extend(encode(100, 200));
+        assert!(parse_transfer_requests(&duplicate, true, &entries).is_err());
+        let mut disjoint = encode(0, 200);
+        disjoint.extend(encode(200, 200));
+        assert_eq!(
+            parse_transfer_requests(&disjoint, true, &entries)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(parse_transfer_requests(&[0], true, &entries).is_err());
+    }
+    #[test]
+    fn legacy_offset_requests_remain_supported() {
+        let entries = vec![FileEntry {
+            relative: String::new(),
+            size: 1024,
+            modified_ms: 0,
+            source_path: None,
+        }];
+        let mut bytes = 0u32.to_be_bytes().to_vec();
+        bytes.extend_from_slice(&500u64.to_be_bytes());
+        let parsed = parse_transfer_requests(&bytes, false, &entries).unwrap();
+        assert_eq!(parsed[0].offset, 500);
+        assert_eq!(parsed[0].length, 524);
+        bytes.extend(bytes.clone());
+        assert!(parse_transfer_requests(&bytes, false, &entries).is_err());
+    }
+    #[tokio::test]
+    #[ignore = "requires compiled Kotlin fixture and ZTDROP_JVM_TEST_CP"]
+    async fn rust_sender_to_kotlin_segmented_receiver() -> Result<()> {
+        let classpath =
+            std::env::var("ZTDROP_JVM_TEST_CP").context("missing JVM fixture classpath")?;
+        let root = std::env::temp_dir().join(format!(
+            "ztdrop-cross-range-{:032x}",
+            rand::random::<u128>()
+        ));
+        tokio::fs::create_dir_all(&root).await?;
+        let source = root.join("cross.bin");
+        let bytes: Vec<u8> = (0..12 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+        tokio::fs::write(&source, &bytes).await?;
+        let shares: CodeRegistry = Arc::new(RwLock::new(HashMap::new()));
+        let item = register_new_code(
+            shares.clone(),
+            "cross.bin".into(),
+            bytes.len() as u64,
+            false,
+            vec![source.clone()],
+        )
+        .await?;
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let server = tokio::spawn(async move {
+            let mut workers = Vec::new();
+            // One metadata request plus three 4MiB workers.
+            for _ in 0..4 {
+                let (stream, _) = timeout(Duration::from_secs(20), listener.accept()).await??;
+                let shares = shares.clone();
+                workers.push(tokio::spawn(async move {
+                    serve_connection(
+                        stream,
+                        shares,
+                        "JVM fixture".into(),
+                        "127.0.0.1".into(),
+                        |_| {},
+                    )
+                    .await
+                }));
+            }
+            for worker in workers {
+                worker.await??;
+            }
+            Ok::<_, anyhow::Error>(())
+        });
+        let token = item.token;
+        let output_root = root.join("android-fixture");
+        let client = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("java")
+                .args([
+                    "-cp",
+                    &classpath,
+                    "com.ztdrop.android.CrossPeerHarnessKt",
+                    &port.to_string(),
+                    &token,
+                ])
+                .arg(source)
+                .arg(output_root)
+                .output()
+        })
+        .await??;
+        server.await??;
+        println!("{}", String::from_utf8_lossy(&client.stdout));
+        anyhow::ensure!(
+            client.status.success(),
+            "Kotlin client failed: {}",
+            String::from_utf8_lossy(&client.stderr)
+        );
+        tokio::fs::remove_dir_all(root).await?;
+        Ok(())
+    }
+    #[tokio::test]
+    async fn pc_large_download_uses_parallel_ranges_and_resumes_segments() -> Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let root = std::env::temp_dir().join(format!(
+            "ztdrop-pc-segments-{:032x}",
+            rand::random::<u128>()
+        ));
+        tokio::fs::create_dir_all(&root).await?;
+        let source = root.join("source.bin");
+        let target = root.join("target.bin");
+        let contents: Vec<u8> = (0..(12 * 1024 * 1024 + 137))
+            .map(|i| ((i * 17 + i / 251) % 251) as u8)
+            .collect();
+        tokio::fs::write(&source, &contents).await?;
+        tokio::fs::write(&target, b"old target").await?;
+        let entry = scan_manifest(&source, false)?.files.remove(0);
+        let partial = partial_path(&target, &entry)?;
+        // A completed first segment plus an interrupted second segment must both resume.
+        let first = partial.with_extension("segment-0");
+        let second = partial.with_extension("segment-1");
+        tokio::fs::write(&first, &contents[..4 * 1024 * 1024]).await?;
+        tokio::fs::write(&second, &contents[4 * 1024 * 1024..4 * 1024 * 1024 + 317]).await?;
+        let shares: CodeRegistry = Arc::new(RwLock::new(HashMap::new()));
+        let item = register_new_code(
+            shares.clone(),
+            "source.bin".into(),
+            contents.len() as u64,
+            false,
+            vec![source],
+        )
+        .await?;
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let server_peak = peak.clone();
+        let server = tokio::spawn(async move {
+            let mut tasks = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let (stream, _) = accepted.unwrap();
+                        let registry = shares.clone();
+                        let active = active.clone();
+                        let peak = server_peak.clone();
+                        tasks.spawn(async move {
+                            let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                            peak.fetch_max(count, Ordering::SeqCst);
+                            let result = serve_connection(stream, registry, "test".into(), "127.0.0.1".into(), |_| {}).await;
+                            active.fetch_sub(1, Ordering::SeqCst);
+                            result
+                        });
+                    }
+                    _ = tasks.join_next(), if !tasks.is_empty() => {}
+                }
+            }
+        });
+        let mut initial = None;
+        let mut last = 0;
+        let result = timeout(
+            Duration::from_secs(15),
+            receive_attempt(
+                address,
+                None,
+                &item.token,
+                &target,
+                contents.len() as u64,
+                false,
+                true,
+                |status, done, total, _| {
+                    if status == "transferring" {
+                        initial.get_or_insert(done);
+                        assert!(done >= last && done <= total);
+                        last = done;
+                    }
+                },
+            ),
+        )
+        .await?;
+        server.abort();
+        result?;
+        assert!(
+            peak.load(Ordering::SeqCst) > 1,
+            "PC receiver still uses one sequential connection"
+        );
+        assert_eq!(
+            initial,
+            Some(4 * 1024 * 1024 + 317),
+            "resume must count persisted segment bytes"
+        );
+        assert_eq!(tokio::fs::read(&target).await?, contents);
+        assert!(!first.exists() && !second.exists() && !partial.exists());
+        tokio::fs::remove_dir_all(root).await?;
+        Ok(())
+    }
+    #[tokio::test]
+    async fn interrupted_parallel_download_preserves_target_and_resumes() -> Result<()> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let root = std::env::temp_dir().join(format!(
+            "ztdrop-interrupted-segments-{:032x}",
+            rand::random::<u128>()
+        ));
+        tokio::fs::create_dir_all(&root).await?;
+        let source = root.join("source.bin");
+        let target = root.join("target.bin");
+        let contents: Vec<u8> = (0..(9 * 1024 * 1024 + 31))
+            .map(|i| (i % 239) as u8)
+            .collect();
+        tokio::fs::write(&source, &contents).await?;
+        tokio::fs::write(&target, b"original survives").await?;
+        let manifest = scan_manifest(&source, false)?;
+        let partial = partial_path(&target, &manifest.files[0])?;
+        let shares: CodeRegistry = Arc::new(RwLock::new(HashMap::new()));
+        let item = register_new_code(
+            shares.clone(),
+            "source.bin".into(),
+            contents.len() as u64,
+            false,
+            vec![source],
+        )
+        .await?;
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let first = Arc::new(AtomicBool::new(true));
+        let data = Arc::new(contents.clone());
+        let server = tokio::spawn(async move {
+            let mut tasks = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let (mut stream, _) = accepted.unwrap();
+                        let registry = shares.clone();
+                        let manifest = manifest.clone();
+                        let data = data.clone();
+                        let interrupt = first.swap(false, Ordering::SeqCst);
+                        tasks.spawn(async move {
+                            if !interrupt { return serve_connection(stream, registry, "test".into(), "127.0.0.1".into(), |_| {}).await; }
+                            let mut handshake = [0u8; 36];
+                            stream.read_exact(&mut handshake).await?;
+                            let mut wire = serde_json::to_value(manifest)?;
+                            wire["range_requests"] = serde_json::json!(1);
+                            let bytes = serde_json::to_vec(&wire)?;
+                            stream.write_u8(1).await?;
+                            stream.write_u32(bytes.len() as u32).await?;
+                            stream.write_all(&bytes).await?;
+                            assert_eq!(stream.read_u32().await?, u32::MAX);
+                            let count = stream.read_u32().await?;
+                            let mut raw = vec![0u8; count as usize * 20];
+                            stream.read_exact(&mut raw).await?;
+                            let offset = u64::from_be_bytes(raw[4..12].try_into()?) as usize;
+                            stream.write_u8(1).await?;
+                            stream.write_all(&data[offset..offset + 1234]).await?;
+                            stream.shutdown().await?;
+                            Ok::<(), anyhow::Error>(())
+                        });
+                    }
+                    _ = tasks.join_next(), if !tasks.is_empty() => {}
+                }
+            }
+        });
+        let result = receive_attempt(
+            address,
+            None,
+            &item.token,
+            &target,
+            contents.len() as u64,
+            false,
+            true,
+            |_, _, _, _| {},
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(tokio::fs::read(&target).await?, b"original survives");
+        assert!(
+            !partial.exists(),
+            "sparse/interrupted merge must not masquerade as contiguous prefix"
+        );
+        assert_eq!(
+            tokio::fs::metadata(partial.with_extension("segment-0"))
+                .await?
+                .len(),
+            1234
+        );
+        receive_attempt(
+            address,
+            None,
+            &item.token,
+            &target,
+            contents.len() as u64,
+            false,
+            true,
+            |_, _, _, _| {},
+        )
+        .await?;
+        assert_eq!(tokio::fs::read(&target).await?, contents);
+        server.abort();
         tokio::fs::remove_dir_all(root).await?;
         Ok(())
     }
