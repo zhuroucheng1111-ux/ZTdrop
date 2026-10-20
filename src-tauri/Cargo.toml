@@ -1,6 +1,6 @@
 [package]
 name = "ztdrop"
-version = "1.0.0"
+version = "1.0.1"
 description = "ZTDrop - LAN file transfer with 4-digit share codes"
 authors = ["zhuroucheng"]
 license = "MIT"

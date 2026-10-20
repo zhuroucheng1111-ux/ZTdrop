@@ -411,7 +411,8 @@ internal class TransferEngine(private val context: Context, private val changed:
             update(token, "direct", share.name, done, total, status, error, receiverIp, requestId)
         if (route == "/s/$token") {
             report(0, share.size, "visited")
-            val html = "<!doctype html><meta charset=utf-8><title>ZTDrop</title><a href=\"/download/$token\">下载文件</a>"
+            val template = context.assets.open("download_page.html").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val html = renderDownloadPage(template, share.name, share.size, token)
             httpReply(socket, 200, "OK", html.toByteArray(Charsets.UTF_8), "text/html; charset=utf-8")
             return
         }

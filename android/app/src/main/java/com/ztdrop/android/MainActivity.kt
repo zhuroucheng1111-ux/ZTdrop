@@ -1375,7 +1375,7 @@ class MainActivity : Activity() {
         body.addView(settingsGroup(settingRow("通讯协议", "v2 · UDP 52110"), settingRow("权限与文件访问", "查看说明") { showPermissionInfo() }, settingRow("聊天记录", "仅保存在本机")), modernMargin())
         body.addView(section("关于", ""))
         body.addView(settingsGroup(
-            settingRow("版本", "1.0.0"),
+            settingRow("版本", "1.0.1"),
             settingRow("官网", "GitHub 项目主页") {
                 try {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/zhuroucheng1111-ux/ZTdrop")))

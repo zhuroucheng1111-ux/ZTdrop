@@ -149,7 +149,7 @@ jobs:
           retention-days: 14
 
       - name: 发布 GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && github.ref_name != 'v1.0.1'
         uses: softprops/action-gh-release@v2
         with:
           name: ZTDrop ${{ steps.meta.outputs.version }}

@@ -35,6 +35,16 @@ set APP_HOME=%DIRNAME%
 @rem Resolve any "." and ".." in APP_HOME to make it shorter.
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
+@rem Keep Java's AF_UNIX selector sockets out of a broken user TEMP directory.
+@rem setlocal above keeps these overrides scoped to this Gradle invocation.
+set "ZT_GRADLE_TEMP=%APP_HOME%\build\gradle-temp"
+if not exist "%ZT_GRADLE_TEMP%" (
+    mkdir "%ZT_GRADLE_TEMP%" || exit /b 1
+)
+set "TEMP=%ZT_GRADLE_TEMP%"
+set "TMP=%ZT_GRADLE_TEMP%"
+if defined LOCALAPPDATA if not defined ANDROID_HOME if exist "%LOCALAPPDATA%\Android\Sdk" set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
+
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 

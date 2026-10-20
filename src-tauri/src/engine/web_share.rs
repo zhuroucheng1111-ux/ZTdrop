@@ -141,6 +141,35 @@ fn safe_html(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+fn format_file_size(size: u64) -> String {
+    if size == 0 {
+        return "0 KB".into();
+    }
+    if size < 1024 {
+        return "<1 KB".into();
+    }
+    let (unit, label) = if size >= 1024_u64.pow(3) {
+        (1024_u64.pow(3), "GB")
+    } else if size >= 1024_u64.pow(2) {
+        (1024_u64.pow(2), "MB")
+    } else {
+        (1024, "KB")
+    };
+    let value = format!("{:.1}", size as f64 / unit as f64);
+    format!("{} {label}", value.trim_end_matches(".0"))
+}
+
+fn render_download_page(name: &str, size: u64, web_token: &str) -> String {
+    let status_script = format!(
+        r#"<script>setInterval(async()=>{{try{{let r=await fetch('/api/share/{web_token}/status');if(!r.ok)document.querySelector('#status').textContent='分享已结束或过期'}}catch{{}}}},20000)</script>"#
+    );
+    include_str!("download_page.html")
+        .replace("__TOKEN__", web_token)
+        .replace("__FILE_SIZE__", &safe_html(&format_file_size(size)))
+        .replace("__STATUS_SCRIPT__", &status_script)
+        .replace("__FILE_NAME__", &safe_html(name))
+}
+
 fn encoded_filename(name: &str) -> String {
     let mut out = String::new();
     for byte in name.bytes() {
@@ -512,8 +541,7 @@ impl WebShareServer {
             session.last_seen = Instant::now();
         }
         if kind == "page" {
-            let name = safe_html(&share.name);
-            let page = format!("<!doctype html><html lang=zh-CN><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>ZTDrop 下载</title><style>body{{font-family:system-ui,sans-serif;background:#f6f7f8;color:#20252a;margin:0;padding:30px}}main{{max-width:480px;margin:12vh auto;background:white;padding:28px;border-radius:18px;box-shadow:0 8px 30px #0001}}a{{display:inline-block;background:#282d31;color:white;padding:12px 22px;border-radius:8px;text-decoration:none}}p{{color:#667}}</style><main><h2>ZTDrop 局域网分享</h2><p>{name}</p><p>{} 字节</p><a href='/download/{web_token}'>下载文件</a><p id=status></p></main><script>setInterval(async()=>{{try{{let r=await fetch('/api/share/{web_token}/status');if(!r.ok)document.querySelector('#status').textContent='分享已结束或过期'}}catch{{}}}},20000)</script></html>", share.size);
+            let page = render_download_page(&share.name, share.size, web_token);
             return reply(
                 &mut stream,
                 "200 OK",
@@ -701,6 +729,8 @@ mod tests {
             ),
         )
         .await?;
+        assert!(page.contains("class=\"size\">&lt;1 KB</span>"));
+        assert!(page.contains(&format!("/download/{}", share.token)));
         let cookie = page
             .lines()
             .find_map(|line| line.strip_prefix("Set-Cookie: "))
@@ -820,5 +850,20 @@ mod tests {
     fn html_and_name_escape() {
         assert_eq!(safe_html("<a&\""), "&lt;a&amp;&quot;");
         assert_eq!(encoded_filename("中.txt"), "%E4%B8%AD.txt");
+    }
+    #[test]
+    fn download_page_shows_size_below_file_name() {
+        assert_eq!(format_file_size(0), "0 KB");
+        assert_eq!(format_file_size(512), "<1 KB");
+        assert_eq!(format_file_size(1024), "1 KB");
+        assert_eq!(format_file_size(1024 * 1024), "1 MB");
+        assert_eq!(format_file_size(1024 * 1024 * 1024), "1 GB");
+        let page = render_download_page("<资料&报告>.zip", 1284 * 1024 * 1024 / 10, "abc");
+        assert!(page.contains("&lt;资料&amp;报告&gt;.zip"));
+        assert!(page.contains("128.4 MB"));
+        assert!(!page.contains("单个文件"));
+        assert!(page.contains("/download/abc"));
+        assert!(render_download_page("__STATUS_SCRIPT__", 1, "abc")
+            .contains("class=\"name\">__STATUS_SCRIPT__"));
     }
 }

@@ -2,6 +2,8 @@
 
 ZTDrop 提供 Windows 版与 Android 原生版。在同一个可信局域网内，Windows 版可以用四位分享码传文件和文件夹、向附近设备发送消息与文件，也可以生成供手机或电脑浏览器下载的链接。文件直接在设备之间传输，不依赖账号、云盘或公网中继。
 
+**当前版本：1.0.1（作者：zhuroucheng）。** Windows 与 Android 源码同步更新直链浏览器访问页；Android 1.0.1/build34 当前仅有未签名构建，覆盖安装已签名旧版须沿用原签名。详情见 [Android 说明](android/README.md)。
+
 ## 界面截图
 
 ### 码连 · 发送
@@ -24,7 +26,7 @@ ZTDrop 提供 Windows 版与 Android 原生版。在同一个可信局域网内�
 
 ### 直链
 
-为单个文件生成局域网链接与二维码，手机或电脑浏览器无需安装客户端即可下载，可设置有效期或手动结束。
+为单个文件生成局域网链接与二维码，手机或电脑浏览器无需安装客户端即可下载，可设置有效期或手动结束。Windows 与 Android 生成的浏览器访问页使用统一样式，文件名下方按实际大小显示 KB、MB 或 GB。
 
 ![直链：浏览器下载与二维码](docs/screenshots/03-web-share.png)
 
@@ -57,9 +59,13 @@ ZTDrop Windows 版的界面交互思路参考了 [DashBeam](https://github.com/t
 
 ## 下载与安装
 
-- `ZTDrop_1.0.0_x64-setup.exe`：普通 NSIS 安装包，需要目标系统具备或能够安装 WebView2 Runtime。
-- `ZTDrop_1.0.0_x64-offline-setup.exe`：内置 WebView2 离线运行库，适合目标电脑无法联网安装运行库时使用。
-- `ZTDrop-1.0.0-portable-Win11-x64.zip`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
+**v1.0.1 发布页将先提供源码，安装包由维护者另行上传。** 计划上传的 Windows 文件：
+
+- `ZTDrop_1.0.1_x64-setup.exe`：普通 NSIS 安装包，需要目标系统具备或能够安装 WebView2 Runtime。
+- `ZTDrop_1.0.1_x64-offline-setup.exe`：内置 WebView2 离线运行库，适合目标电脑无法联网安装运行库时使用。
+- `ZTDrop-1.0.1-portable-Win11-x64.zip`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
+
+Android 1.0.1/build34 源码已发布；当前本地 APK 未签名，需要原签名密钥签名后才能覆盖安装旧版。
 
 安装包和程序目前未签名，Windows 可能显示“未知发布者”。两台电脑请使用**相同的版本**，并退出旧版以免端口被占用。Windows 10 尚未完成同等验收；Windows 7 不在当前支持范围内。
 
@@ -104,3 +110,7 @@ npm run build
 cargo test --lib --manifest-path src-tauri/Cargo.toml
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
+
+## 1.0.1 更新
+
+两端直链浏览器访问页统一样式；文件大小另起一行，并按实际大小使用 KB、MB 或 GB。[v1.0.1 发布页](https://github.com/zhuroucheng1111-ux/ZTdrop/releases/tag/v1.0.1)先发布源码，安装包由维护者另行上传。Android 源码已更新至 1.0.1/build34；本地未签名 APK 不可直接覆盖安装已签名旧版。
