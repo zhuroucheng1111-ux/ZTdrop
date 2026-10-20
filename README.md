@@ -57,12 +57,13 @@ ZTDrop Windows 版使用 Tauri 2、React、TypeScript 和 Rust 构建；Android 
 
 ## 下载与安装
 
-**发布页** 上传的 Windows 文件：[releases 发布页](https://github.com/zhuroucheng1111-ux/ZTdrop/releases)
+**发布页** 上传的 **文件** ：[releases 发布页](https://github.com/zhuroucheng1111-ux/ZTdrop/releases)
 
 - `ZTDrop_**_x64-setup.exe`：普通安装包，需要目标系统具备或能够安装 WebView2 Runtime。
 - `ZTDrop_**_x64-offline-setup.exe`：内置 WebView2 离线运行库，适合目标电脑无法联网安装运行库时使用。
 - `ZTDrop-**-portable-Windows-x64.zip`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
 - `ZTDrop-Android-***.apk`：安卓版
+
 安装包和程序目前未签名，Windows 可能显示“未知发布者”。两台电脑请使用**相同的版本**，并退出旧版以免端口被占用。Windows 10 尚未完成同等验收；Windows 7 不在当前支持范围内。
 
 ## 快速使用
