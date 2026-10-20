@@ -2,7 +2,7 @@
 
 ZTDrop 提供 Windows 版与 Android 原生版。在同一个可信局域网内，Windows 版可以用四位分享码传文件和文件夹、向附近设备发送消息与文件，也可以生成供手机或电脑浏览器下载的链接。文件直接在设备之间传输，不依赖账号、云盘或公网中继。
 
-**当前版本：1.0.1（作者：zhuroucheng）。** Windows 与 Android 源码同步更新直链浏览器访问页；Android 1.0.1/build34 当前仅有未签名构建，覆盖安装已签名旧版须沿用原签名。详情见 [Android 说明](android/README.md)。
+**当前版本：1.0.1（作者：zhuroucheng）。** Windows 与 Android 源码同步更新直链浏览器访问页；详情见 [Android 说明](android/README.md)。
 
 ## 界面截图
 
@@ -47,7 +47,7 @@ ZTDrop 提供 Windows 版与 Android 原生版。在同一个可信局域网内�
 | **分享管理** | 查看活跃分享和传输进度，可立即停止，也可选择“传完再停”：拒绝新连接，让已开始的传输完成。 | 本地管理 TCP/HTTP 分享会话和令牌。 |
 | **网络与诊断** | 默认使用已连接的物理以太网或 Wi-Fi 局域网接口；提供端口、在线设备、会话和日志诊断，并可导出报告。 | 检查 UDP 52110、TCP 52111、HTTP 52112 的服务状态。 |
 
-ZTDrop Windows 版的界面交互思路参考了 [DashBeam](https://github.com/tonyantony300/dashbeam)，使用 Tauri 2、React、TypeScript 和 Rust 构建；Android 初版使用 Kotlin 原生界面。
+ZTDrop Windows 版使用 Tauri 2、React、TypeScript 和 Rust 构建；Android 版使用 Kotlin 原生界面。
 
 ### 三种分享模式的通信流程
 
@@ -59,13 +59,13 @@ ZTDrop Windows 版的界面交互思路参考了 [DashBeam](https://github.com/t
 
 ## 下载与安装
 
-**v1.0.1 发布页将先提供源码，安装包由维护者另行上传。** 计划上传的 Windows 文件：
+**v1.0.1 发布页** 上传的 Windows 文件：
 
 - `ZTDrop_1.0.1_x64-setup.exe`：普通 NSIS 安装包，需要目标系统具备或能够安装 WebView2 Runtime。
 - `ZTDrop_1.0.1_x64-offline-setup.exe`：内置 WebView2 离线运行库，适合目标电脑无法联网安装运行库时使用。
 - `ZTDrop-1.0.1-portable-Win11-x64.zip`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
 
-Android 1.0.1/build34 源码已发布；当前本地 APK 未签名，需要原签名密钥签名后才能覆盖安装旧版。
+Android 1.0.1/build34 源码已发布；
 
 安装包和程序目前未签名，Windows 可能显示“未知发布者”。两台电脑请使用**相同的版本**，并退出旧版以免端口被占用。Windows 10 尚未完成同等验收；Windows 7 不在当前支持范围内。
 
