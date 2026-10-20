@@ -1,6 +1,6 @@
 # ZTDrop Android 1.0.1
 
-当前源码 versionName **1.0.1**、versionCode **34**。本轮 APK 为未签名包；原已签名版本及备份不改动。仓库不提交 APK、旧版源码快照或构建缓存。
+当前源码 versionName **1.0.1**、versionCode **34**。
 
 ## 功能
 - 原生 Kotlin 四栏界面：传输、消息、设备、我的。仅新主题；Android 自适应闪电图标。
