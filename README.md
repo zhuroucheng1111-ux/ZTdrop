@@ -2,8 +2,6 @@
 
 ZTDrop 提供 Windows 版与 Android 原生版。在同一个可信局域网内，Windows 版可以用四位分享码传文件和文件夹、向附近设备发送消息与文件，也可以生成供手机或电脑浏览器下载的链接。文件直接在设备之间传输，不依赖账号、云盘或公网中继。
 
-**当前版本：1.0.1（作者：zhuroucheng）。** Windows 与 Android 源码同步更新直链浏览器访问页；详情见 [Android 说明](android/README.md)。
-
 ## 界面截图
 
 ### 码连 · 发送
