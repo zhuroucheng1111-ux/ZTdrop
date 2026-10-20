@@ -37,8 +37,6 @@ pwsh -NoProfile -File android/build-release.ps1 -BuildDirectory C:\Temp\ZTDrop-b
 - 本地 Android SDK 与 `android/build/toolchain/`：当前构建使用的平台工具和 ZXing JAR；旧 `../release/android-toolchain` 仍受脚本默认参数兼容。
 - ../docs/移动端.html：用户 UI 设计参考。
 
-PC 源码与正式发布产物此次不变；PC 主题重做及后续协同发布计划保留。清理记录见 ../docs/maintenance/android-cleanup-20261008/VERIFICATION.txt。旧产物移入 Windows 回收站；工作目录不保留其副本。
-
 ## 聊天复制与图片预览（2026-10-08）
 PC 消息支持选中文字/Ctrl+C和复制按钮；附件菜单可选择多张图片，逐张发送。图片仍使用兼容的 file 信令和原文件传输，发送方立即预览、接收方下载完成后预览，普通文件/文件夹不变。PC 支持 PNG/JPEG/GIF/WebP/BMP，预览上限10MB，超过上限或损坏时保留原文件卡片；点击图片查看大图，Esc关闭。安卓文字长按选中复制，发送/接收完成的图片缓存采样缩略图，点击大图可缩放；接收缓存使用实际SAF提交后的URI，不将本机路径或缩略图发送到信令。数据库迁移新增独立本机媒体索引，历史已下载但未记录路径的图片需重新接收。PC版本与安卓1.0.0/build33保持；新APK独立输出为未签名开发包，不覆盖正式签名备份，不操作手机。
 
