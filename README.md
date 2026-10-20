@@ -59,14 +59,12 @@ ZTDrop Windows 版使用 Tauri 2、React、TypeScript 和 Rust 构建；Android 
 
 ## 下载与安装
 
-**v1.0.1 发布页** 上传的 Windows 文件：
+**发布页** 上传的 Windows 文件：[releases 发布页](https://github.com/zhuroucheng1111-ux/ZTdrop/releases)
 
-- `ZTDrop_1.0.1_x64-setup.exe`：普通 NSIS 安装包，需要目标系统具备或能够安装 WebView2 Runtime。
-- `ZTDrop_1.0.1_x64-offline-setup.exe`：内置 WebView2 离线运行库，适合目标电脑无法联网安装运行库时使用。
-- `ZTDrop-1.0.1-portable-Win11-x64.zip`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
-
-Android 1.0.1/build34 源码已发布；
-
+- `ZTDrop_**_x64-setup.exe`：普通安装包，需要目标系统具备或能够安装 WebView2 Runtime。
+- `ZTDrop_**_x64-offline-setup.exe`：内置 WebView2 离线运行库，适合目标电脑无法联网安装运行库时使用。
+- `ZTDrop-**-portable-Windows-x64.zip`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
+- `ZTDrop-Android-***.apk`：安卓版
 安装包和程序目前未签名，Windows 可能显示“未知发布者”。两台电脑请使用**相同的版本**，并退出旧版以免端口被占用。Windows 10 尚未完成同等验收；Windows 7 不在当前支持范围内。
 
 ## 快速使用
@@ -110,7 +108,3 @@ npm run build
 cargo test --lib --manifest-path src-tauri/Cargo.toml
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
-
-## 1.0.1 更新
-
-两端直链浏览器访问页统一样式；文件大小另起一行，并按实际大小使用 KB、MB 或 GB。[v1.0.1 发布页](https://github.com/zhuroucheng1111-ux/ZTdrop/releases/tag/v1.0.1)先发布源码，安装包由维护者另行上传。Android 源码已更新至 1.0.1/build34；本地未签名 APK 不可直接覆盖安装已签名旧版。
