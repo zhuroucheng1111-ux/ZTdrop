@@ -64,7 +64,7 @@ ZTDrop Windows 版使用 Tauri 2、React、TypeScript 和 Rust 构建；Android 
 - `ZTDrop-**-portable-Windows-x64.zip`：免安装版，解压后直接运行其中的 `ZTDrop.exe`；首次运行会在同级目录创建 `data\`。
 - `ZTDrop-Android-***.apk`：安卓版
 
-- 安装包和程序目前未签名，Windows 可能显示“未知发布者”。两台电脑请使用**相同的版本**，并退出旧版以免端口被占用。Windows 10 尚未完成同等验收；Windows 7 不在当前支持范围内。
+- 安装包和程序目前未签名，Windows 可能显示“未知发布者”。两台电脑请使用**相同的版本**，并退出旧版以免端口被占用。
 
 ## 快速使用
 
